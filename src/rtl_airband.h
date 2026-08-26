@@ -72,6 +72,10 @@
 
 #define WAVE_BATCH WAVE_RATE / 8
 #define AGC_EXTRA 100
+// Post-retune audio a scan frequency must be evaluated on before it may be
+// declared silent.  Must comfortably exceed the squelch open delay so a
+// transmission that is already in progress when we tune in is never missed.
+#define SCAN_MIN_CLEAN_SAMPLES (WAVE_RATE / 20)
 #define WAVE_LEN 2 * WAVE_BATCH + AGC_EXTRA
 #define MP3_RATE 8000
 #define MAX_SHOUT_QUEUELEN 32768
@@ -269,6 +273,7 @@ struct channel_t {
     struct freq_t* freqlist;
     int freq_count;
     int freq_idx;
+    int freq_idx_pending;  // scan mode: freq_idx to switch to once pre-retune samples are gone, -1 if none
     int needs_raw_iq;
     int has_iq_outputs;
     enum ch_states state;  // mixer channel state flag
@@ -299,6 +304,17 @@ struct device_t {
     int failed;
     enum rec_modes mode;
     size_t output_overrun_count;
+    // Scan mode retune bookkeeping.  Written by the controller thread on retune,
+    // consumed by the (single) demod thread that owns this device.
+    //
+    // tune_stale_samples: wave samples still to be consumed that predate the last retune
+    // clean_samples_since_tune: post-retune wave samples demodulated, saturated at SCAN_MIN_CLEAN_SAMPLES
+    // signal_count: incremented per batch in which squelch opened on post-retune samples
+    // stale_this_batch: demod thread only - pre-retune samples at the head of the batch being processed
+    volatile int tune_stale_samples;
+    volatile unsigned int clean_samples_since_tune;
+    volatile unsigned int signal_count;
+    int stale_this_batch;
 };
 
 struct mixinput_t {

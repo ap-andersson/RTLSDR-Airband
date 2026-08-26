@@ -230,6 +230,7 @@ MODULE_EXPORT input_t* mirisdr_input_new() {
     input->fullscale = (float)SCHAR_MAX - 0.5f;
     input->bytes_per_sample = sizeof(char);
     input->sample_rate = MIRISDR_DEFAULT_SAMPLE_RATE;
+    input->latency_bytes = MIRISDR_BUFSIZE;
     input->parse_config = &mirisdr_parse_config;
     input->init = &mirisdr_init;
     input->run_rx_thread = &mirisdr_rx_thread;

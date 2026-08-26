@@ -324,6 +324,7 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
         channel->mode = MM_MONO;
         channel->freq_count = 1;
         channel->freq_idx = 0;
+        channel->freq_idx_pending = -1;
         channel->highpass = chans[j].exists("highpass") ? (int)chans[j]["highpass"] : 100;
         channel->lowpass = chans[j].exists("lowpass") ? (int)chans[j]["lowpass"] : 2500;
 #ifdef NFM
@@ -807,6 +808,10 @@ int parse_devices(libconfig::Setting& devs) {
         dev->output_overrun_count = 0;
         dev->waveend = dev->waveavail = dev->row = dev->tq_head = dev->tq_tail = 0;
         dev->last_frequency = -1;
+        dev->tune_stale_samples = 0;
+        dev->clean_samples_since_tune = 0;
+        dev->signal_count = 0;
+        dev->stale_this_batch = 0;
 
         libconfig::Setting& chans = devs[i]["channels"];
         if (chans.getLength() < 1) {

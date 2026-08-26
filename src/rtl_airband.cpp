@@ -59,6 +59,7 @@
 #include <ctime>
 #include <iostream>
 #include <libconfig.h++>
+#include "helper_functions.h"
 #include "input-common.h"
 #include "logging.h"
 #include "rtl_airband.h"
@@ -101,30 +102,60 @@ void sighandler(int sig) {
     do_exit = 1;
 }
 
+// Tell the demodulator that the tuner has just moved.  Everything already in the
+// input ring buffer, plus whatever the driver has captured but not yet delivered,
+// still belongs to the previous scan frequency.
+static void mark_retune(device_t* dev, int freq_idx) {
+    input_t* input = dev->input;
+    size_t bps = 2 * input->bytes_per_sample * (size_t)round((double)input->sample_rate / (double)WAVE_RATE);
+    size_t buffered;
+
+    pthread_mutex_lock(&input->buffer_lock);
+    buffered = ring_buffer_used(input->bufs, input->bufe, input->buf_size);
+    pthread_mutex_unlock(&input->buffer_lock);
+
+    dev->clean_samples_since_tune = 0;
+    dev->tune_stale_samples = (int)stale_samples_after_retune(buffered, input->latency_bytes, bps);
+    dev->channels[0].freq_idx_pending = freq_idx;
+}
+
 void* controller_thread(void* params) {
     device_t* dev = (device_t*)params;
     int i = 0;
     int consecutive_squelch_off = 0;
     int new_centerfreq = 0;
     struct timeval tv;
+    unsigned int last_signal_count = dev->signal_count;
 
     if (dev->channels[0].freq_count < 2)
         return 0;
     while (!do_exit) {
         SLEEP(200);
-        if (dev->channels[0].axcindicate == NO_SIGNAL) {
+
+        // A retune leaves pre-retune samples in the pipeline and the demodulator
+        // only evaluates squelch once per WAVE_BATCH, so a fixed sleep is not
+        // enough to tell "silent" from "not looked at yet".  Wait until the
+        // frequency has actually been listened to before judging it, otherwise
+        // the scanner hops away from transmissions it has already tuned in to
+        // and only picks them up a full scan cycle later.
+        while (!do_exit && dev->input->state == INPUT_RUNNING && dev->signal_count == last_signal_count && dev->clean_samples_since_tune < SCAN_MIN_CLEAN_SAMPLES) {
+            SLEEP(20);
+        }
+
+        if (dev->signal_count == last_signal_count) {
             if (consecutive_squelch_off < 10) {
                 consecutive_squelch_off++;
             } else {
                 i++;
                 i %= dev->channels[0].freq_count;
-                dev->channels[0].freq_idx = i;
                 new_centerfreq = dev->channels[0].freqlist[i].frequency + 20 * (double)(dev->input->sample_rate / fft_size);
                 if (input_set_centerfreq(dev->input, new_centerfreq) < 0) {
                     break;
                 }
+                mark_retune(dev, i);
             }
         } else {
+            last_signal_count = dev->signal_count;
             if (consecutive_squelch_off == 10) {
                 if (log_scan_activity)
                     log(LOG_INFO, "Activity on %7.3f MHz (%s)\n", dev->channels[0].freqlist[i].frequency / 1000000.0, dev->channels[0].freqlist[i].label);
@@ -394,10 +425,7 @@ void* demodulate(void* params) {
         device_t* dev = devices + device_num;
 
         pthread_mutex_lock(&dev->input->buffer_lock);
-        if (dev->input->bufe >= dev->input->bufs)
-            available = dev->input->bufe - dev->input->bufs;
-        else
-            available = dev->input->buf_size - dev->input->bufs + dev->input->bufe;
+        available = ring_buffer_used(dev->input->bufs, dev->input->bufe, dev->input->buf_size);
         pthread_mutex_unlock(&dev->input->buffer_lock);
 
         if (devices_running == 0) {
@@ -514,12 +542,29 @@ void* demodulate(void* params) {
         }
 #endif /* WITH_BCM_VC */
 
+        if (dev->tune_stale_samples > 0) {
+            int stale = std::min((int)FFT_BATCH, (int)dev->tune_stale_samples);
+            dev->tune_stale_samples -= stale;
+            dev->stale_this_batch += stale;
+        }
+
         dev->waveend += FFT_BATCH;
 
         if (dev->waveend >= WAVE_BATCH + AGC_EXTRA) {
+            const int stale_count = dev->stale_this_batch;
             for (int i = 0; i < dev->channel_count; i++) {
-                AFC afc(dev, i);
                 channel_t* channel = dev->channels + i;
+
+                // A retune is only applied once the samples it invalidated have
+                // been consumed, so pre-retune audio stays with the frequency it
+                // was received on and the new frequency's squelch and AGC only
+                // ever see samples from that frequency.
+                if (channel->freq_idx_pending >= 0 && stale_count < WAVE_BATCH) {
+                    channel->freq_idx = channel->freq_idx_pending;
+                    channel->freq_idx_pending = -1;
+                }
+
+                AFC afc(dev, i);
                 freq_t* fparms = channel->freqlist + channel->freq_idx;
 
                 // set to NO_SIGNAL, will be updated to SIGNAL based on squelch below
@@ -528,6 +573,18 @@ void* demodulate(void* params) {
                 for (int j = AGC_EXTRA; j < WAVE_BATCH + AGC_EXTRA; j++) {
                     float& real = channel->iq_in[2 * (j - AGC_EXTRA)];
                     float& imag = channel->iq_in[2 * (j - AGC_EXTRA) + 1];
+
+                    // Sample was received before the last retune, on a frequency
+                    // we are no longer tuned to - discard it rather than let it
+                    // reach the output or the squelch.
+                    if (j - AGC_EXTRA < stale_count) {
+                        channel->waveout[j] = 0;
+                        if (channel->has_iq_outputs) {
+                            channel->iq_out[2 * (j - AGC_EXTRA)] = 0;
+                            channel->iq_out[2 * (j - AGC_EXTRA) + 1] = 0;
+                        }
+                        continue;
+                    }
 
                     fparms->squelch.process_raw_sample(channel->wavein[j]);
 
@@ -677,6 +734,19 @@ void* demodulate(void* params) {
             } else {
                 dev->waveavail = 1;
             }
+            if (dev->mode == R_SCAN) {
+                // axcindicate can only have been set by post-retune samples, so
+                // any signal here is activity on the frequency we are tuned to.
+                if (stale_count < WAVE_BATCH) {
+                    if (dev->channels[0].axcindicate != NO_SIGNAL) {
+                        dev->signal_count++;
+                    }
+                    if (dev->clean_samples_since_tune < SCAN_MIN_CLEAN_SAMPLES) {
+                        dev->clean_samples_since_tune += WAVE_BATCH - stale_count;
+                    }
+                }
+            }
+            dev->stale_this_batch = 0;
             dev->waveend -= WAVE_BATCH;
 #ifdef DEBUG
             gettimeofday(&te, NULL);

@@ -84,3 +84,17 @@ string make_dated_subdirs(const string& basedir, const struct tm* time) {
     // on any error return empty string
     return "";
 }
+
+size_t ring_buffer_used(size_t start, size_t end, size_t size) {
+    if (end >= start) {
+        return end - start;
+    }
+    return size - start + end;
+}
+
+size_t stale_samples_after_retune(size_t buffered_bytes, size_t latency_bytes, size_t bytes_per_wave_sample) {
+    if (bytes_per_wave_sample == 0) {
+        return 0;
+    }
+    return (buffered_bytes + latency_bytes) / bytes_per_wave_sample;
+}

@@ -20,8 +20,17 @@
 #ifndef _HELPER_FUNCTIONS_H
 #define _HELPER_FUNCTIONS_H
 
-#include <ctime>  // struct tm
+#include <cstddef>  // size_t
+#include <ctime>    // struct tm
 #include <string>
+
+// Bytes of unread data in an input ring buffer, where `start` is the read
+// position, `end` the write position and `size` the buffer length.
+size_t ring_buffer_used(size_t start, size_t end, size_t size);
+
+// Output wave samples that predate a retune: everything still queued in the input
+// ring buffer plus whatever the driver has captured but not yet delivered.
+size_t stale_samples_after_retune(size_t buffered_bytes, size_t latency_bytes, size_t bytes_per_wave_sample);
 
 bool dir_exists(const std::string& dir_path);
 bool file_exists(const std::string& file_path);

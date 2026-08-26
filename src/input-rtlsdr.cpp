@@ -245,6 +245,7 @@ MODULE_EXPORT input_t* rtlsdr_input_new() {
     input->fullscale = (float)SCHAR_MAX - 0.5f;
     input->bytes_per_sample = sizeof(unsigned char);
     input->sample_rate = RTLSDR_DEFAULT_SAMPLE_RATE;
+    input->latency_bytes = RTLSDR_BUFSIZE;
     input->parse_config = &rtlsdr_parse_config;
     input->init = &rtlsdr_init;
     input->run_rx_thread = &rtlsdr_rx_thread;
