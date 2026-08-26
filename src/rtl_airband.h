@@ -86,6 +86,12 @@
 #define MAX_FFT_SIZE_LOG 13
 
 #define LAMEBUF_SIZE 22000  // todo: calculate
+// Default mp3 encoder settings, applied to any output that does not override
+// them.  VBR keeps recordings small; a stream that needs low latency wants CBR
+// instead, since a listener-side buffer measured in bytes drains in a time that
+// depends on the byte rate (see the `bitrate` / `vbr` output options).
+#define MP3_BITRATE_DEFAULT 16
+#define MP3_VBR_DEFAULT true
 #define MIX_DIVISOR 2
 
 #ifdef WITH_BCM_VC
@@ -196,6 +202,10 @@ struct output_t {
     // if `uses_mp3_output` is true
     lame_t lame;
     unsigned char* lamebuf;
+
+    // mp3 encoder settings for this output
+    int bitrate;  // kbps
+    bool vbr;
 };
 
 struct freq_tag {
@@ -363,7 +373,7 @@ struct output_params_t {
 extern char const* RTL_AIRBAND_VERSION;
 
 // output.cpp
-lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass);
+lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass, int bitrate, bool vbr);
 void shout_setup(icecast_data* icecast, mix_modes mixmode);
 void disable_device_outputs(device_t* dev);
 void disable_channel_outputs(channel_t* channel);

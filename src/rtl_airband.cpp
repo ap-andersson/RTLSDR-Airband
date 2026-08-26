@@ -301,7 +301,7 @@ void init_demod(demod_params_t* params, Signal* signal, int device_start, int de
 
 bool init_output(channel_t* channel, output_t* output) {
     if (output->has_mp3_output) {
-        output->lame = airlame_init(channel->mode, channel->highpass, channel->lowpass);
+        output->lame = airlame_init(channel->mode, channel->highpass, channel->lowpass, output->bitrate, output->vbr);
         output->lamebuf = (unsigned char*)malloc(sizeof(unsigned char) * LAMEBUF_SIZE);
     }
     if (output->type == O_ICECAST) {

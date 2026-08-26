@@ -32,6 +32,10 @@ size_t ring_buffer_used(size_t start, size_t end, size_t size);
 // ring buffer plus whatever the driver has captured but not yet delivered.
 size_t stale_samples_after_retune(size_t buffered_bytes, size_t latency_bytes, size_t bytes_per_wave_sample);
 
+// Whether `bitrate` (in kbps) is one the MPEG-2 / MPEG-2.5 Layer III sample rates
+// that MP3_RATE selects can actually be encoded at.
+bool mp3_bitrate_is_valid(int bitrate);
+
 bool dir_exists(const std::string& dir_path);
 bool file_exists(const std::string& file_path);
 bool make_dir(const std::string& dir_path);

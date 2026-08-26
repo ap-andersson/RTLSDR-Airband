@@ -197,3 +197,18 @@ TEST_F(HelperFunctionsTest, stale_samples_after_retune_zero_bytes_per_sample) {
     EXPECT_EQ(stale_samples_after_retune(6400, 320000, 0), (size_t)0);
 }
 
+TEST_F(HelperFunctionsTest, mp3_bitrate_is_valid) {
+    EXPECT_TRUE(mp3_bitrate_is_valid(8));
+    EXPECT_TRUE(mp3_bitrate_is_valid(16));
+    EXPECT_TRUE(mp3_bitrate_is_valid(48));
+    EXPECT_TRUE(mp3_bitrate_is_valid(160));
+}
+
+TEST_F(HelperFunctionsTest, mp3_bitrate_is_invalid) {
+    // rates that only exist for MPEG-1, plus values that are not mp3 rates at all
+    EXPECT_FALSE(mp3_bitrate_is_valid(192));
+    EXPECT_FALSE(mp3_bitrate_is_valid(320));
+    EXPECT_FALSE(mp3_bitrate_is_valid(20));
+    EXPECT_FALSE(mp3_bitrate_is_valid(0));
+    EXPECT_FALSE(mp3_bitrate_is_valid(-16));
+}

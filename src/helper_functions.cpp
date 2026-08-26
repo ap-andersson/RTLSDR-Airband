@@ -98,3 +98,13 @@ size_t stale_samples_after_retune(size_t buffered_bytes, size_t latency_bytes, s
     }
     return (buffered_bytes + latency_bytes) / bytes_per_wave_sample;
 }
+
+bool mp3_bitrate_is_valid(int bitrate) {
+    static const int valid[] = {8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160};
+    for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); i++) {
+        if (valid[i] == bitrate) {
+            return true;
+        }
+    }
+    return false;
+}

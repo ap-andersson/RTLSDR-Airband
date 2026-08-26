@@ -144,7 +144,7 @@ void shout_setup(icecast_data* icecast, mix_modes mixmode) {
     }
 }
 
-lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass) {
+lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass, int bitrate, bool vbr) {
     lame_t lame = lame_init();
     if (!lame) {
         log(LOG_WARNING, "lame_init failed\n");
@@ -152,8 +152,8 @@ lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass) {
     }
 
     lame_set_in_samplerate(lame, WAVE_RATE);
-    lame_set_VBR(lame, vbr_mtrh);
-    lame_set_brate(lame, 16);
+    lame_set_VBR(lame, vbr ? vbr_mtrh : vbr_off);
+    lame_set_brate(lame, bitrate);
     lame_set_quality(lame, 7);
     lame_set_lowpassfreq(lame, lowpass);
     lame_set_highpassfreq(lame, highpass);
@@ -175,7 +175,7 @@ class LameTone {
     int _bytes;
 
    public:
-    LameTone(mix_modes mixmode, int msec, unsigned int hz = 0) : _data(NULL), _bytes(0) {
+    LameTone(mix_modes mixmode, int bitrate, bool vbr, int msec, unsigned int hz = 0) : _data(NULL), _bytes(0) {
         _data = (unsigned char*)XCALLOC(1, LAMEBUF_SIZE);
 
         int samples = (msec * WAVE_RATE) / 1000;
@@ -191,7 +191,7 @@ class LameTone {
             }
         } else
             memset(buf, 0, samples * sizeof(float));
-        lame_t lame = airlame_init(mixmode, 0, 0);
+        lame_t lame = airlame_init(mixmode, 0, 0, bitrate, vbr);
         if (lame) {
             _bytes = lame_encode_buffer_ieee_float(lame, buf, (mixmode == MM_STEREO ? buf : NULL), samples, _data, LAMEBUF_SIZE);
             if (_bytes > 0) {
@@ -247,7 +247,7 @@ int rename_if_exists(char const* oldpath, char const* newpath) {
  * If appending to an audio file, insert discontinuity indictor tones
  * as well as the appropriate amount of silence when in continuous mode.
  */
-static int open_file(file_data* fdata, mix_modes mixmode, int is_audio) {
+static int open_file(file_data* fdata, mix_modes mixmode, int bitrate, bool vbr, int is_audio) {
     int rename_result = rename_if_exists(fdata->file_path.c_str(), fdata->file_path_tmp.c_str());
     if (fdata->append) {
         // Open without O_APPEND so fseek+fwrite works correctly (e.g. for the lametag).
@@ -284,9 +284,9 @@ static int open_file(file_data* fdata, mix_modes mixmode, int is_audio) {
 
     if (is_audio) {
         // fill missing space with marker tones
-        LameTone lt_a(mixmode, 120, 2222);
-        LameTone lt_b(mixmode, 120, 1111);
-        LameTone lt_c(mixmode, 120, 555);
+        LameTone lt_a(mixmode, bitrate, vbr, 120, 2222);
+        LameTone lt_b(mixmode, bitrate, vbr, 120, 1111);
+        LameTone lt_c(mixmode, bitrate, vbr, 120, 555);
 
         int r = lt_a.write(fdata->f);
         if (r == 0)
@@ -303,7 +303,7 @@ static int open_file(file_data* fdata, mix_modes mixmode, int is_audio) {
                     log(LOG_WARNING, "Too big time difference: %llu sec, limiting to one hour\n", (unsigned long long)delta);
                     delta = 3600;
                 }
-                LameTone lt_silence(mixmode, 1000);
+                LameTone lt_silence(mixmode, bitrate, vbr, 1000);
                 for (; (r == 0 && delta > 1); --delta)
                     r = lt_silence.write(fdata->f);
             }
@@ -468,7 +468,7 @@ static bool output_file_ready(channel_t* channel, output_t* output) {
     fdata->open_time = fdata->last_write_time = current_time;
 
     const int is_audio = output->type == O_RAWFILE ? 0 : 1;
-    if (open_file(fdata, channel->mode, is_audio) < 0) {
+    if (open_file(fdata, channel->mode, output->bitrate, output->vbr, is_audio) < 0) {
         log(LOG_WARNING, "Cannot open output file %s (%s)\n", fdata->file_path_tmp.c_str(), strerror(errno));
         return false;
     }
