@@ -72,6 +72,10 @@
 
 #define WAVE_BATCH WAVE_RATE / 8
 #define AGC_EXTRA 100
+// Post-retune audio a scan frequency must be evaluated on before it may be
+// declared silent.  Must comfortably exceed the squelch open delay so a
+// transmission that is already in progress when we tune in is never missed.
+#define SCAN_MIN_CLEAN_SAMPLES (WAVE_RATE / 20)
 #define WAVE_LEN 2 * WAVE_BATCH + AGC_EXTRA
 #define MP3_RATE 8000
 #define MAX_SHOUT_QUEUELEN 32768
@@ -82,6 +86,12 @@
 #define MAX_FFT_SIZE_LOG 13
 
 #define LAMEBUF_SIZE 22000  // todo: calculate
+// Default mp3 encoder settings, applied to any output that does not override
+// them.  VBR keeps recordings small; a stream that needs low latency wants CBR
+// instead, since a listener-side buffer measured in bytes drains in a time that
+// depends on the byte rate (see the `bitrate` / `vbr` output options).
+#define MP3_BITRATE_DEFAULT 16
+#define MP3_VBR_DEFAULT true
 #define MIX_DIVISOR 2
 
 #ifdef WITH_BCM_VC
@@ -192,6 +202,10 @@ struct output_t {
     // if `uses_mp3_output` is true
     lame_t lame;
     unsigned char* lamebuf;
+
+    // mp3 encoder settings for this output
+    int bitrate;  // kbps
+    bool vbr;
 };
 
 struct freq_tag {
@@ -269,6 +283,7 @@ struct channel_t {
     struct freq_t* freqlist;
     int freq_count;
     int freq_idx;
+    int freq_idx_pending;  // scan mode: freq_idx to switch to once pre-retune samples are gone, -1 if none
     int needs_raw_iq;
     int has_iq_outputs;
     enum ch_states state;  // mixer channel state flag
@@ -299,6 +314,17 @@ struct device_t {
     int failed;
     enum rec_modes mode;
     size_t output_overrun_count;
+    // Scan mode retune bookkeeping.  Written by the controller thread on retune,
+    // consumed by the (single) demod thread that owns this device.
+    //
+    // tune_stale_samples: wave samples still to be consumed that predate the last retune
+    // clean_samples_since_tune: post-retune wave samples demodulated, saturated at SCAN_MIN_CLEAN_SAMPLES
+    // signal_count: incremented per batch in which squelch opened on post-retune samples
+    // stale_this_batch: demod thread only - pre-retune samples at the head of the batch being processed
+    volatile int tune_stale_samples;
+    volatile unsigned int clean_samples_since_tune;
+    volatile unsigned int signal_count;
+    int stale_this_batch;
 };
 
 struct mixinput_t {
@@ -347,7 +373,7 @@ struct output_params_t {
 extern char const* RTL_AIRBAND_VERSION;
 
 // output.cpp
-lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass);
+lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass, int bitrate, bool vbr);
 void shout_setup(icecast_data* icecast, mix_modes mixmode);
 void disable_device_outputs(device_t* dev);
 void disable_channel_outputs(channel_t* channel);

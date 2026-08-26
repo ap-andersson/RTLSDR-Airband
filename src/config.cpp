@@ -26,6 +26,7 @@
 #include <cstring>
 #include <iostream>
 #include <libconfig.h++>
+#include "helper_functions.h"
 #include "input-common.h"  // input_t
 #include "rtl_airband.h"
 
@@ -37,6 +38,8 @@ static int parse_outputs(libconfig::Setting& outs, channel_t* channel, int i, in
         channel->outputs[oo].has_mp3_output = false;
         channel->outputs[oo].lame = NULL;
         channel->outputs[oo].lamebuf = NULL;
+        channel->outputs[oo].bitrate = MP3_BITRATE_DEFAULT;
+        channel->outputs[oo].vbr = MP3_VBR_DEFAULT;
 
         if (outs[o].exists("disable") && (bool)outs[o]["disable"] == true) {
             continue;
@@ -261,6 +264,23 @@ static int parse_outputs(libconfig::Setting& outs, channel_t* channel, int i, in
             cerr << "unknown output type\n";
             error();
         }
+        // mp3 encoder settings, honoured by every output type that encodes mp3
+        if (outs[o].exists("bitrate")) {
+            channel->outputs[oo].bitrate = (int)outs[o]["bitrate"];
+            if (!mp3_bitrate_is_valid(channel->outputs[oo].bitrate)) {
+                if (parsing_mixers) {
+                    cerr << "Configuration error: mixers.[" << i << "] outputs.[" << o << "]: ";
+                } else {
+                    cerr << "Configuration error: devices.[" << i << "] channels.[" << j << "] outputs.[" << o << "]: ";
+                }
+                cerr << "bitrate " << channel->outputs[oo].bitrate << " is not a valid mp3 bitrate (8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160)\n";
+                error();
+            }
+        }
+        if (outs[o].exists("vbr")) {
+            channel->outputs[oo].vbr = (bool)outs[o]["vbr"];
+        }
+
         channel->outputs[oo].enabled = true;
         channel->outputs[oo].active = false;
         oo++;
@@ -324,6 +344,7 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
         channel->mode = MM_MONO;
         channel->freq_count = 1;
         channel->freq_idx = 0;
+        channel->freq_idx_pending = -1;
         channel->highpass = chans[j].exists("highpass") ? (int)chans[j]["highpass"] : 100;
         channel->lowpass = chans[j].exists("lowpass") ? (int)chans[j]["lowpass"] : 2500;
 #ifdef NFM
@@ -807,6 +828,10 @@ int parse_devices(libconfig::Setting& devs) {
         dev->output_overrun_count = 0;
         dev->waveend = dev->waveavail = dev->row = dev->tq_head = dev->tq_tail = 0;
         dev->last_frequency = -1;
+        dev->tune_stale_samples = 0;
+        dev->clean_samples_since_tune = 0;
+        dev->signal_count = 0;
+        dev->stale_this_batch = 0;
 
         libconfig::Setting& chans = devs[i]["channels"];
         if (chans.getLength() < 1) {

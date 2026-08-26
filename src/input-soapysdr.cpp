@@ -358,6 +358,7 @@ MODULE_EXPORT input_t* soapysdr_input_new() {
     input->fullscale = 0.0f;
     input->bytes_per_sample = 0;
     input->sample_rate = -1;
+    input->latency_bytes = SOAPYSDR_BUFSIZE;
 
     input->parse_config = &soapysdr_parse_config;
     input->init = &soapysdr_init;

@@ -47,6 +47,11 @@ struct input_t {
     int bytes_per_sample;
     int sample_rate;
     int centerfreq;
+    // Bytes the driver may already have captured but not yet handed to the ring
+    // buffer (typically one full transfer).  Samples in flight when the tuner is
+    // retuned still belong to the previous frequency, so scan mode needs to know
+    // how much of the incoming data to discard after a retune.
+    size_t latency_bytes;
     int (*parse_config)(input_t* const input, libconfig::Setting& cfg);
     int (*init)(input_t* const input);
     void* (*run_rx_thread)(void* input_ptr);  // to be launched via pthread_create()

@@ -84,3 +84,27 @@ string make_dated_subdirs(const string& basedir, const struct tm* time) {
     // on any error return empty string
     return "";
 }
+
+size_t ring_buffer_used(size_t start, size_t end, size_t size) {
+    if (end >= start) {
+        return end - start;
+    }
+    return size - start + end;
+}
+
+size_t stale_samples_after_retune(size_t buffered_bytes, size_t latency_bytes, size_t bytes_per_wave_sample) {
+    if (bytes_per_wave_sample == 0) {
+        return 0;
+    }
+    return (buffered_bytes + latency_bytes) / bytes_per_wave_sample;
+}
+
+bool mp3_bitrate_is_valid(int bitrate) {
+    static const int valid[] = {8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160};
+    for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); i++) {
+        if (valid[i] == bitrate) {
+            return true;
+        }
+    }
+    return false;
+}
