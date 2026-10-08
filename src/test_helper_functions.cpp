@@ -197,6 +197,111 @@ TEST_F(HelperFunctionsTest, stale_samples_after_retune_zero_bytes_per_sample) {
     EXPECT_EQ(stale_samples_after_retune(6400, 320000, 0), (size_t)0);
 }
 
+TEST_F(HelperFunctionsTest, stale_window_tracks_first_and_last_stale_sample) {
+    stale_window_t w;
+    stale_window_reset(&w);
+    EXPECT_EQ(w.begin, -1);
+
+    stale_window_add(&w, 10, 0);  // nothing stale yet
+    EXPECT_EQ(w.begin, -1);
+
+    stale_window_add(&w, 600, 1);
+    stale_window_add(&w, 601, 1);
+    stale_window_add(&w, 602, 1);
+    EXPECT_EQ(w.begin, 600);
+    EXPECT_EQ(w.end, 603);
+
+    // GPU FFT builds consume FFT_BATCH samples per iteration
+    stale_window_reset(&w);
+    stale_window_add(&w, 250, 250);
+    stale_window_add(&w, 500, 100);
+    EXPECT_EQ(w.begin, 250);
+    EXPECT_EQ(w.end, 600);
+}
+
+TEST_F(HelperFunctionsTest, plan_retune_batch_no_retune) {
+    stale_window_t w;
+    stale_window_reset(&w);
+    retune_plan_t p = plan_retune_batch(w, false, 0, 1000);
+    EXPECT_EQ(p.discard_from, p.discard_to);
+    EXPECT_FALSE(p.switch_freq);
+}
+
+TEST_F(HelperFunctionsTest, plan_retune_batch_retune_mid_batch) {
+    // Retune after 600 samples of the batch, 300 stale samples follow, then 100 fresh ones.
+    // The first 600 are from the old frequency as well, so they must not reach the new
+    // frequency's squelch - only the last 100 may.
+    stale_window_t w;
+    stale_window_reset(&w);
+    for (int pos = 600; pos < 900; pos++) {
+        stale_window_add(&w, pos, 1);
+    }
+    retune_plan_t p = plan_retune_batch(w, true, 0, 1000);
+    EXPECT_TRUE(p.switch_freq);
+    EXPECT_EQ(p.discard_from, 0);
+    EXPECT_EQ(p.discard_to, 900);
+}
+
+TEST_F(HelperFunctionsTest, plan_retune_batch_stale_continues_into_next_batch) {
+    // Retune after 600 samples, still stale at the end of the batch: the first 600 samples
+    // belong to the old frequency and are processed as such, the rest is dropped.
+    stale_window_t w;
+    stale_window_reset(&w);
+    for (int pos = 600; pos < 1000; pos++) {
+        stale_window_add(&w, pos, 1);
+    }
+    retune_plan_t p = plan_retune_batch(w, true, 250, 1000);
+    EXPECT_FALSE(p.switch_freq);
+    EXPECT_EQ(p.discard_from, 600);
+    EXPECT_EQ(p.discard_to, 1000);
+}
+
+TEST_F(HelperFunctionsTest, plan_retune_batch_stale_ends_in_following_batch) {
+    // continuation of the case above: 250 stale samples at the head of the next batch
+    stale_window_t w;
+    stale_window_reset(&w);
+    for (int pos = 0; pos < 250; pos++) {
+        stale_window_add(&w, pos, 1);
+    }
+    retune_plan_t p = plan_retune_batch(w, true, 0, 1000);
+    EXPECT_TRUE(p.switch_freq);
+    EXPECT_EQ(p.discard_from, 0);
+    EXPECT_EQ(p.discard_to, 250);
+}
+
+TEST_F(HelperFunctionsTest, plan_retune_batch_whole_batch_stale) {
+    stale_window_t w;
+    stale_window_reset(&w);
+    for (int pos = 0; pos < 1000; pos++) {
+        stale_window_add(&w, pos, 1);
+    }
+    retune_plan_t p = plan_retune_batch(w, true, 300, 1000);
+    EXPECT_FALSE(p.switch_freq);
+    EXPECT_EQ(p.discard_from, 0);
+    EXPECT_EQ(p.discard_to, 1000);
+}
+
+TEST_F(HelperFunctionsTest, plan_retune_batch_retune_after_last_sample_of_batch) {
+    // The retune was marked but none of its stale samples are in this batch yet: the
+    // whole batch is from the old frequency.
+    stale_window_t w;
+    stale_window_reset(&w);
+    retune_plan_t p = plan_retune_batch(w, true, 500, 1000);
+    EXPECT_FALSE(p.switch_freq);
+    EXPECT_EQ(p.discard_from, p.discard_to);
+}
+
+TEST_F(HelperFunctionsTest, plan_retune_batch_retune_without_stale_samples) {
+    // Nothing was buffered (e.g. file input), so it is unknown where in the batch the
+    // retune happened - drop the whole batch rather than mix the two frequencies.
+    stale_window_t w;
+    stale_window_reset(&w);
+    retune_plan_t p = plan_retune_batch(w, true, 0, 1000);
+    EXPECT_TRUE(p.switch_freq);
+    EXPECT_EQ(p.discard_from, 0);
+    EXPECT_EQ(p.discard_to, 1000);
+}
+
 TEST_F(HelperFunctionsTest, mp3_bitrate_is_valid) {
     EXPECT_TRUE(mp3_bitrate_is_valid(8));
     EXPECT_TRUE(mp3_bitrate_is_valid(16));

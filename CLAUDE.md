@@ -191,6 +191,8 @@ Each device operates in one of two modes, set via `mode = "multichannel"` (defau
 
 **`R_SCAN`** — The device has exactly one channel, but that channel holds a `freqs` list of frequencies to cycle through. A controller thread monitors the squelch: after ~2 seconds of no signal (10 × 200 ms polls), it retunes the SDR hardware to the next frequency via `input_set_centerfreq()`. When a signal is detected, it stays on the current frequency. Per-frequency labels, squelch thresholds, modulation, notch filters, and CTCSS settings are all supported in the `freqs` list. (`rtl_airband.cpp:101-140`, `config.cpp:825`)
 
+Samples already buffered or in flight at a retune still belong to the old frequency (`mark_retune()`, `stale_samples_after_retune()`). A retune usually lands mid-batch, so the demod loop records where those stale samples fall in the current `WAVE_BATCH` (`stale_window_t`) and `plan_retune_batch()` decides what to drop and when to switch `freq_idx`: everything up to the end of the stale samples is dropped in the batch where the switch happens, so no old-frequency audio reaches the new frequency's squelch. Measured on an RTL-SDR (R820T, 2.56 Msps), a retune shows up in the stream at most ~50 ms after the samples delivered when `rtlsdr_set_center_freq()` returns, within the one-USB-buffer (62.5 ms) allowance in `latency_bytes`.
+
 ### Threading Model
 
 - **RX thread** (1 per device, always) — reads SDR samples into the circular buffer (`input-common.cpp`)

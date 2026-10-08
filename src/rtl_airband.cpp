@@ -548,13 +548,14 @@ void* demodulate(void* params) {
         if (dev->tune_stale_samples > 0) {
             int stale = std::min((int)FFT_BATCH, (int)dev->tune_stale_samples);
             dev->tune_stale_samples -= stale;
-            dev->stale_this_batch += stale;
+            stale_window_add(&dev->stale_window, dev->waveend - AGC_EXTRA, stale);
         }
 
         dev->waveend += FFT_BATCH;
 
         if (dev->waveend >= WAVE_BATCH + AGC_EXTRA) {
-            const int stale_count = dev->stale_this_batch;
+            const int stale_remaining = dev->tune_stale_samples;
+            int fresh_count = WAVE_BATCH;
             for (int i = 0; i < dev->channel_count; i++) {
                 channel_t* channel = dev->channels + i;
 
@@ -562,9 +563,14 @@ void* demodulate(void* params) {
                 // been consumed, so pre-retune audio stays with the frequency it
                 // was received on and the new frequency's squelch and AGC only
                 // ever see samples from that frequency.
-                if (channel->freq_idx_pending >= 0 && stale_count < WAVE_BATCH) {
+                const bool retune_pending = channel->freq_idx_pending >= 0;
+                const retune_plan_t plan = plan_retune_batch(dev->stale_window, retune_pending, stale_remaining, WAVE_BATCH);
+                if (plan.switch_freq) {
                     channel->freq_idx = channel->freq_idx_pending;
                     channel->freq_idx_pending = -1;
+                    fresh_count = WAVE_BATCH - plan.discard_to;
+                } else if (retune_pending) {
+                    fresh_count = 0;
                 }
 
                 AFC afc(dev, i);
@@ -580,7 +586,7 @@ void* demodulate(void* params) {
                     // Sample was received before the last retune, on a frequency
                     // we are no longer tuned to - discard it rather than let it
                     // reach the output or the squelch.
-                    if (j - AGC_EXTRA < stale_count) {
+                    if (j - AGC_EXTRA >= plan.discard_from && j - AGC_EXTRA < plan.discard_to) {
                         channel->waveout[j] = 0;
                         if (channel->has_iq_outputs) {
                             channel->iq_out[2 * (j - AGC_EXTRA)] = 0;
@@ -742,18 +748,18 @@ void* demodulate(void* params) {
                 dev->waveavail = 1;
             }
             if (dev->mode == R_SCAN) {
-                // axcindicate can only have been set by post-retune samples, so
-                // any signal here is activity on the frequency we are tuned to.
-                if (stale_count < WAVE_BATCH) {
+                // With fresh samples in the batch, axcindicate can only have been set
+                // by them, so any signal here is activity on the frequency we are tuned to.
+                if (fresh_count > 0) {
                     if (dev->channels[0].axcindicate != NO_SIGNAL) {
                         dev->signal_count++;
                     }
                     if (dev->clean_samples_since_tune < SCAN_MIN_CLEAN_SAMPLES) {
-                        dev->clean_samples_since_tune += WAVE_BATCH - stale_count;
+                        dev->clean_samples_since_tune += fresh_count;
                     }
                 }
             }
-            dev->stale_this_batch = 0;
+            stale_window_reset(&dev->stale_window);
             dev->waveend -= WAVE_BATCH;
 #ifdef DEBUG
             gettimeofday(&te, NULL);

@@ -45,7 +45,8 @@
 #endif /* WITH_PULSEAUDIO */
 
 #include "filters.h"
-#include "input-common.h"  // input_t
+#include "helper_functions.h"  // stale_window_t
+#include "input-common.h"      // input_t
 #include "logging.h"
 #include "metrics.h"
 #include "squelch.h"
@@ -323,11 +324,11 @@ struct device_t {
     // tune_stale_samples: wave samples still to be consumed that predate the last retune
     // clean_samples_since_tune: post-retune wave samples demodulated, saturated at SCAN_MIN_CLEAN_SAMPLES
     // signal_count: incremented per batch in which squelch opened on post-retune samples
-    // stale_this_batch: demod thread only - pre-retune samples at the head of the batch being processed
+    // stale_window: demod thread only - where the pre-retune samples are in the batch being collected
     volatile int tune_stale_samples;
     volatile unsigned int clean_samples_since_tune;
     volatile unsigned int signal_count;
-    int stale_this_batch;
+    stale_window_t stale_window;
 };
 
 struct mixinput_t {

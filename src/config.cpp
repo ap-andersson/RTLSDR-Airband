@@ -834,7 +834,7 @@ int parse_devices(libconfig::Setting& devs) {
         dev->tune_stale_samples = 0;
         dev->clean_samples_since_tune = 0;
         dev->signal_count = 0;
-        dev->stale_this_batch = 0;
+        stale_window_reset(&dev->stale_window);
 
         libconfig::Setting& chans = devs[i]["channels"];
         if (chans.getLength() < 1) {

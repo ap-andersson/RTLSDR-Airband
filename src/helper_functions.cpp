@@ -99,6 +99,32 @@ size_t stale_samples_after_retune(size_t buffered_bytes, size_t latency_bytes, s
     return (buffered_bytes + latency_bytes) / bytes_per_wave_sample;
 }
 
+void stale_window_reset(stale_window_t* w) {
+    w->begin = -1;
+    w->end = 0;
+}
+
+void stale_window_add(stale_window_t* w, int batch_pos, int count) {
+    if (count <= 0) {
+        return;
+    }
+    if (w->begin < 0) {
+        w->begin = batch_pos;
+    }
+    w->end = batch_pos + count;
+}
+
+retune_plan_t plan_retune_batch(const stale_window_t& w, bool retune_pending, int stale_remaining, int batch_size) {
+    const bool has_stale = w.begin >= 0;
+    if (!retune_pending || stale_remaining > 0) {
+        // still on the old frequency, only the stale tail of the batch (if any) is dropped
+        return has_stale ? retune_plan_t{w.begin, batch_size, false} : retune_plan_t{0, 0, false};
+    }
+    // Everything before the end of the stale samples is from the old frequency.  Without
+    // stale samples there is no telling where the retune happened, so drop it all.
+    return {0, has_stale ? w.end : batch_size, true};
+}
+
 bool mp3_bitrate_is_valid(int bitrate) {
     static const int valid[] = {8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160};
     for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); i++) {
