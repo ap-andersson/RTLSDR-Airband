@@ -26,6 +26,7 @@
 #include <cstring>
 #include <iostream>
 #include <libconfig.h++>
+#include <new>  // placement new
 #include "helper_functions.h"
 #include "input-common.h"  // input_t
 #include "rtl_airband.h"
@@ -301,6 +302,7 @@ static struct freq_t* mk_freqlist(int n) {
         fl[i].ampfactor = 1.0f;
         fl[i].squelch = Squelch();
         fl[i].active_counter = 0;
+        new (&fl[i].transmission_stats) TransmissionStats();
         fl[i].modulation = MOD_AM;
     }
     return fl;
@@ -826,6 +828,7 @@ int parse_devices(libconfig::Setting& devs) {
         dev->input->bufs = dev->input->bufe = 0;
         dev->input->overflow_count = 0;
         dev->output_overrun_count = 0;
+        new (&dev->input_stats) InputStats();
         dev->waveend = dev->waveavail = dev->row = dev->tq_head = dev->tq_tail = 0;
         dev->last_frequency = -1;
         dev->tune_stale_samples = 0;

@@ -89,3 +89,27 @@ def test_am_squelch_open(
         stats.device("buffer_overflow_count") == 0
     ), "Unexpected device buffer overflow"
     stats_validator.assert_no_excessive_overruns(stats, max_overrun_count)
+
+    opens = stats.channel("channel_squelch_counter", freq_hz)
+    assert opens >= 1
+    assert (
+        stats.channel("channel_transmission_duration_seconds_count", freq_hz) == opens
+    ), "Expected one recorded transmission per squelch open"
+    assert (
+        stats.channel("channel_transmission_snr_db_count", freq_hz) == opens
+    ), "Expected one SNR value per recorded transmission"
+    airtime = stats.channel("channel_transmission_duration_seconds_sum", freq_hz)
+    assert (
+        0.8 * DURATION_S <= airtime <= 1.2 * DURATION_S
+    ), f"Expected about {DURATION_S}s of recorded airtime, got {airtime}s"
+    assert stats.channel("channel_dbfs_squelch_level", freq_hz) is not None
+
+    samples = stats.device("device_samples_total")
+    assert (
+        0.9 * TOTAL_IQ_DURATION_S * SAMPLE_RATE
+        <= samples
+        <= TOTAL_IQ_DURATION_S * SAMPLE_RATE
+    ), f"Expected about {TOTAL_IQ_DURATION_S}s of input samples, got {samples}"
+    assert 0 <= stats.device("device_clipped_samples_total") <= samples
+    assert stats.device("device_input_power_sum_total") > 0
+    assert stats.first("rtl_airband_build_info") == 1

@@ -492,6 +492,9 @@ void* demodulate(void* params) {
         } else {  // S8 or U8
             levels_ptr = (dev->input->sfmt == SFMT_U8 ? levels_u8 : levels_s8);
 
+            // only the bytes this iteration consumes, FFT windows overlap so counting all would count samples multiple times
+            dev->input_stats.add_8bit(dev->input->buffer + dev->input->bufs, bps * FFT_BATCH / 2, dev->input->sfmt == SFMT_S8);
+
 #ifdef WITH_BCM_VC
             sample_fft_arg sfa = {fft_size / 4, fft->in};
             for (size_t i = 0; i < FFT_BATCH; i++) {
@@ -587,6 +590,10 @@ void* demodulate(void* params) {
                     }
 
                     fparms->squelch.process_raw_sample(channel->wavein[j]);
+                    if (fparms->squelch.transmission_ended()) {
+                        const Squelch::Transmission& t = fparms->squelch.last_transmission();
+                        fparms->transmission_stats.record(20.0f * log10f(t.peak_level / t.noise_floor), (float)t.sample_count / WAVE_RATE);
+                    }
 
                     // If squelch is open / opening and using I/Q, then cleanup the signal and possibly update squelch.
                     if (fparms->squelch.should_filter_sample() && channel->needs_raw_iq) {

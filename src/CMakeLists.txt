@@ -284,6 +284,7 @@ add_library (rtl_airband_base OBJECT
 	rtl_airband.cpp
 	squelch.cpp
 	ctcss.cpp
+	metrics.cpp
 	util.cpp
 	udp_stream.cpp
 	logging.cpp
@@ -353,6 +354,7 @@ if(BUILD_UNITTESTS)
 	file(GLOB_RECURSE TEST_FILES "test_*.cpp")
 	list(APPEND TEST_FILES
 		squelch.cpp
+		metrics.cpp
 		logging.cpp
 		filters.cpp
 		ctcss.cpp

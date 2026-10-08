@@ -68,6 +68,13 @@
 
 class Squelch {
    public:
+    // Summary of one completed transmission, from squelch OPEN until it is CLOSED again
+    struct Transmission {
+        float peak_level;     // highest signal_level() seen
+        float noise_floor;    // noise_level() when squelch opened
+        size_t sample_count;  // samples processed while the transmission lasted
+    };
+
     Squelch();
 
     void set_squelch_level_threshold(const float& level);
@@ -94,6 +101,10 @@ class Squelch {
     const size_t& flappy_count(void) const;
     const size_t& ctcss_count(void) const;
     const size_t& no_ctcss_count(void) const;
+
+    // True only during the sample in which a transmission finished; last_transmission() then holds its summary
+    bool transmission_ended(void) const;
+    const Transmission& last_transmission(void) const;
 
 #ifdef DEBUG_SQUELCH
     ~Squelch(void);
@@ -141,6 +152,11 @@ class Squelch {
     size_t sample_count_;   // number of samples processed (for logging)
     size_t flappy_count_;   // number of times squelch was detected as flapping OPEN/CLOSED
     int low_signal_count_;  // number of repeated samples below squelch
+
+    bool in_transmission_;
+    bool transmission_ended_;
+    Transmission current_transmission_;
+    Transmission last_transmission_;
 
     // Flap detection parameters
     size_t recent_sample_size_;    // number of samples defined as "recent"

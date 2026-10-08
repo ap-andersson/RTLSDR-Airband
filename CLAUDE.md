@@ -181,6 +181,7 @@ SDR device (input-*.cpp)
 | `src/filters.cpp/h` | IIR lowpass and notch filters |
 | `src/squelch.cpp/h` | Noise-power-based voice activity detection |
 | `src/ctcss.cpp/h` | CTCSS tone detection |
+| `src/metrics.cpp/h` | Histogram, per-frequency transmission stats, per-device 8-bit input stats (clipping, power) and Prometheus text writers |
 
 ### Device Modes
 
@@ -211,6 +212,15 @@ mixers: ( { name = "mix1"; inputs: ( { device=0; channel=0; ampfactor=1.0; } ); 
 
 Output types: `icecast`, `file`, `rawfile`, `udp_stream`, `mixer`, `pulse`.
 
+### Stats / Metrics
+
+With `stats_filepath` set, the first output thread rewrites a Prometheus text-format file every 15 s and once more at exit (`write_stats_file()` in `output.cpp`). It is written to `<path>.tmp` and renamed into place. Rendering is table-driven (`freq_metrics[]`, `transmission_metrics[]`); the original metric names, help texts and label formatting must stay unchanged so existing dashboards keep working.
+
+- Per-transmission stats: `Squelch` tracks each transmission from OPEN to CLOSED and flags `transmission_ended()` for one sample; the demod loop then records SNR (peak level vs. the noise floor when squelch opened) and duration into `freq_t::transmission_stats` (histograms).
+- Per-device input stats: the demod loop feeds only the newly consumed 8-bit bytes of each iteration to `device_t::input_stats` (clipped samples, sample count, power sum). Not collected for S16/F32 inputs.
+- Stats are written by the demod thread only and read by the output thread; counters are atomics updated with relaxed load + store.
+- `freq_t` and `device_t` are `calloc`ed, so the stats members are constructed with placement new in `config.cpp`.
+
 ### Unit Tests
 
-Tests use Google Test (fetched via CMake FetchContent). Test files in `src/test_*.cpp` cover filters, squelch, CTCSS, helper functions, and signal generation. `src/test_base_class.h` provides test utilities.
+Tests use Google Test (fetched via CMake FetchContent). Test files in `src/test_*.cpp` cover filters, squelch, CTCSS, metrics, helper functions, and signal generation. `src/test_base_class.h` provides test utilities.

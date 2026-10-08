@@ -12,6 +12,7 @@ File format (tab-separated key/value, Prometheus text protocol):
 
 Channel metrics use freq="<MHz:.3f>" as the primary label, e.g. freq="120.025".
 Device metrics use device="<index>".
+Histograms add _bucket (with an le label), _sum and _count samples.
 """
 
 from __future__ import annotations
@@ -48,6 +49,11 @@ class StatsFile:
             if f'device="{index}"' in labels_str:
                 return value
         return None
+
+    def first(self, metric: str) -> float | None:
+        """Return the value of the first sample of a metric regardless of labels, or None."""
+        samples = self._metrics.get(metric, [])
+        return samples[0][1] if samples else None
 
 
 def assert_no_excessive_overruns(stats: StatsFile, max_overrun_count: int) -> None:

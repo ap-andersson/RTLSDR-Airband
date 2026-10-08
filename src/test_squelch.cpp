@@ -279,3 +279,86 @@ TEST_F(SquelchTest, close_ctcss) {
     EXPECT_EQ(squelch.ctcss_count(), 0);
     EXPECT_GT(squelch.no_ctcss_count(), 0);
 }
+
+class SquelchTransmissionTest : public SquelchTest {
+   protected:
+    // Feeds sample until the squelch reports a finished transmission or max_samples is reached.
+    // Returns the number of finished transmissions seen.
+    int feed(Squelch& squelch, float sample, int max_samples) {
+        int ended = 0;
+        for (int i = 0; i < max_samples; ++i) {
+            squelch.process_raw_sample(sample);
+            if (squelch.transmission_ended()) {
+                ended++;
+            }
+        }
+        return ended;
+    }
+};
+
+TEST_F(SquelchTransmissionTest, nothing_recorded_by_default) {
+    Squelch squelch;
+    EXPECT_FALSE(squelch.transmission_ended());
+    EXPECT_EQ(feed(squelch, raw_no_signal_sample, 5000), 0);
+}
+
+TEST_F(SquelchTransmissionTest, transmission_recorded_once_on_close) {
+    Squelch squelch;
+    send_samples_for_noise_floor(squelch);
+    const float noise_floor = squelch.noise_level();
+
+    const int signal_samples = 4000;
+    EXPECT_EQ(feed(squelch, raw_signal_sample, signal_samples), 0);
+    ASSERT_TRUE(squelch.is_open());
+
+    EXPECT_EQ(feed(squelch, raw_no_signal_sample, 2000), 1);
+    ASSERT_FALSE(squelch.is_open());
+    EXPECT_EQ(squelch.open_count(), 1u);
+
+    const Squelch::Transmission& t = squelch.last_transmission();
+    EXPECT_NEAR(t.peak_level, raw_signal_sample, 0.01 * raw_signal_sample);
+    EXPECT_NEAR(t.noise_floor, noise_floor, 0.01 * noise_floor);
+    // duration runs from OPEN (after the open delay) to CLOSED (after the close delay)
+    EXPECT_GT(t.sample_count, (size_t)(signal_samples - 300));
+    EXPECT_LT(t.sample_count, (size_t)(signal_samples + 500));
+}
+
+TEST_F(SquelchTransmissionTest, ended_flag_lasts_one_sample) {
+    Squelch squelch;
+    send_samples_for_noise_floor(squelch);
+    feed(squelch, raw_signal_sample, 2000);
+
+    int i = 0;
+    for (; i < 2000 && !squelch.transmission_ended(); ++i) {
+        squelch.process_raw_sample(raw_no_signal_sample);
+    }
+    ASSERT_TRUE(squelch.transmission_ended());
+
+    squelch.process_raw_sample(raw_no_signal_sample);
+    EXPECT_FALSE(squelch.transmission_ended());
+}
+
+TEST_F(SquelchTransmissionTest, blip_that_never_opens_is_not_recorded) {
+    Squelch squelch;
+    send_samples_for_noise_floor(squelch);
+
+    int ended = feed(squelch, raw_signal_sample, 50);
+    ended += feed(squelch, raw_no_signal_sample, 3000);
+
+    EXPECT_EQ(squelch.open_count(), 0u);
+    EXPECT_EQ(ended, 0);
+}
+
+TEST_F(SquelchTransmissionTest, one_record_per_transmission) {
+    Squelch squelch;
+    send_samples_for_noise_floor(squelch);
+
+    int ended = 0;
+    for (int n = 0; n < 3; ++n) {
+        ended += feed(squelch, raw_signal_sample, 2000);
+        ended += feed(squelch, raw_no_signal_sample, 2000);
+    }
+
+    EXPECT_EQ(squelch.open_count(), 3u);
+    EXPECT_EQ(ended, 3);
+}

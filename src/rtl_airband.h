@@ -47,6 +47,7 @@
 #include "filters.h"
 #include "input-common.h"  // input_t
 #include "logging.h"
+#include "metrics.h"
 #include "squelch.h"
 
 #define ALIGNED32 __attribute__((aligned(32)))
@@ -259,7 +260,8 @@ struct freq_t {
     float agcavgfast;  // average power, for AGC
     float ampfactor;   // multiplier to increase / decrease volume
     Squelch squelch;
-    size_t active_counter;         // count of loops where channel has signal
+    size_t active_counter;  // count of loops where channel has signal
+    TransmissionStats transmission_stats;
     NotchFilter notch_filter;      // notch filter - good to remove CTCSS tones
     LowpassFilter lowpass_filter;  // lowpass filter, applied to I/Q after derotation, set at bandwidth/2 to remove out of band noise
     enum modulations modulation;
@@ -314,6 +316,7 @@ struct device_t {
     int failed;
     enum rec_modes mode;
     size_t output_overrun_count;
+    InputStats input_stats;  // only updated for 8-bit sample formats
     // Scan mode retune bookkeeping.  Written by the controller thread on retune,
     // consumed by the (single) demod thread that owns this device.
     //
