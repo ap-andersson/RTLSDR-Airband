@@ -4,6 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Working Norms
 
+- **Never commit directly to `main`.** Check `git branch --show-current` before committing; if it is `main`, create a branch first. All changes reach `main` through a pull request. Name branches `<prefix>/<short_description>`, where the prefix is the contributor's GitHub username or a category such as `dev` or `fix` (e.g. `dev/drop_macos14_ci`).
 - **Keep this file updated** as changes are made to the codebase.
 - **Never guess or make assumptions** — ask clarifying questions when requirements are unclear.
 - **All code changes should include unit tests.** When possible, write tests first and implement code to make them pass (TDD).
@@ -12,6 +13,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Development Environment
 
 The repo is set up for development in VS Code using a devcontainer (`.devcontainer/`). When working inside the devcontainer, all compile, test, and run commands must be executed inside the container.
+
+Large system test cases for manual runs can be kept outside the repo in `../RTLSDR-Airband_test_cases/` (a sibling of the checkout, so several checkouts can share one copy). The devcontainer mounts it read-only at `system_tests/test_cases/` (gitignored); the pytest suite does not read it. `initializeCommand` creates an empty folder on the host if it is missing, so the container starts without it. This needs a POSIX host shell (macOS, Linux, WSL) and a container rebuild to take effect.
 
 ## Wiki Documentation
 
@@ -32,7 +35,7 @@ When reviewing code:
 
 ## Project Overview
 
-RTLSDR-Airband is a C++ SDR (Software-Defined Radio) application that receives analog radio voice channels from SDR devices (RTL-SDR, SoapySDR, MiriSDR) and produces MP3 audio streams for Icecast, file recording, UDP, and PulseAudio.
+RTLSDR-Airband is a C++ SDR (Software-Defined Radio) application that receives analog radio voice channels from SDR devices (RTL-SDR, SoapySDR) and produces MP3 audio streams for Icecast, file recording, UDP, and PulseAudio.
 
 ## Build Commands
 
@@ -63,18 +66,17 @@ Key CMake flags (all in `src/CMakeLists.txt`):
 | `NFM` | OFF | Enable Narrow FM demodulation |
 | `PLATFORM` | `native` | Optimization target: `native`, `generic`, `rpiv2` |
 | `RTLSDR` | ON | RTL-SDR driver |
-| `MIRISDR` | ON | Mirics SDR driver |
 | `SOAPYSDR` | ON | SoapySDR (vendor-neutral) driver |
 | `PULSEAUDIO` | ON | PulseAudio output |
 | `BUILD_UNITTESTS` | OFF | Build Google Test unit tests |
-| `BCM_VC` | OFF | Broadcom VideoCore GPU FFT (RPi v2 only) |
+| `BCM_VC` | OFF | Broadcom VideoCore GPU FFT (RPi v2 only; requires `PLATFORM=rpiv2`, which also turns it on) |
 
 ## Docker
 
 The container image is built from a multi-stage `Dockerfile` based on `alpine:latest` (musl libc). Alpine is used because it ships a native `linux/arm/v6` image, so a single base covers every Raspberry Pi model (Pi 1/Zero armv6 through Pi 5 arm64) — Debian dropped the armel/`arm/v5` variant that the arm/v6 build previously relied on via fallback.
 
 - Build/runtime dependencies come from `apk`. Note the Alpine-specific package names: `libconfig++` (Alpine splits the C++ binding into its own package), `libstdc++` (not in the base image), `fftw-single-libs`, `libpulse`, and `pkgconf` (provides `pkg-config`).
-- SoapySDR, the rtl-sdr-blog fork (built from source for RTL-SDR Blog V4 support), and libmirisdr-4 are compiled from source with CMake and installed to `/usr` — musl only searches `/lib` and `/usr/lib`, not `/usr/local/lib`. `ENV CMAKE_POLICY_VERSION_MINIMUM=3.5` lets their pre-3.5 `cmake_minimum_required` configure under Alpine's CMake 4.
+- The rtl-sdr-blog fork (for RTL-SDR Blog V4 support) and the SoapyAirspy module are compiled from source with CMake and installed to `/usr` — musl only searches `/lib` and `/usr/lib`, not `/usr/local/lib`. `ENV CMAKE_POLICY_VERSION_MINIMUM=3.5` lets their pre-3.5 `cmake_minimum_required` configure under Alpine's CMake 4.
 - Both stages run `unittests`, so a broken build fails `docker build`. `scripts/find_version` is POSIX `sh` (Alpine has no bash).
 
 ```bash
@@ -87,7 +89,7 @@ docker buildx build --platform linux/arm/v6 --load -t rtlsdr-airband:armv6 .
 
 ## Code Formatting and Pre-commit
 
-Uses clang-format v14 with Chromium style (indent=4, column limit=200, config in `.clang-format`).
+Uses clang-format with Chromium style (indent=4, column limit=200, config in `.clang-format`). The version is pinned only in the `dev` group of `pyproject.toml` (locked in `uv.lock`); the pre-commit hook, the `code_formatting.yml` workflow, and VS Code all run that copy via `uv`, never a distro `clang-format-N`. The dependency is skipped on armv6l (no wheel), so the hook cannot run there. To change the version, edit the pin, run `uv lock`, then `pre-commit run clang-format --all-files`.
 
 ```bash
 # Install pre-commit hooks (once, after cloning)
@@ -97,12 +99,12 @@ pre-commit install
 pre-commit run --all-files
 
 # Format C++ source files manually (also used by CI)
-./scripts/reformat_code
+pre-commit run clang-format --all-files
 ```
 
 Pre-commit hooks (`.pre-commit-config.yaml`) run on every commit and check:
 - YAML/JSON validity, trailing whitespace, EOF newlines, shebang permissions, large files, merge conflict markers, private keys
-- clang-format on all `src/*.cpp` and `src/*.h` files
+- clang-format on all C/C++ files under `src/`
 - shellcheck on all bash scripts (excluding `init.d/`)
 - black, isort, and pylint on all `system_tests/**/*.py` files
 - Build (AM and NFM) and C++ unit tests when `src/*.cpp`, `src/*.h`, or `CMakeLists.txt` are modified (`scripts/run_unit_tests`)
@@ -110,9 +112,9 @@ Pre-commit hooks (`.pre-commit-config.yaml`) run on every commit and check:
 
 ## CI and Pull Request Checks
 
-Four workflows run on pull requests (`.github/workflows/`); the container build also runs on merges to `main`, tags, and a daily schedule:
+Four workflows run checks on open pull requests (`.github/workflows/`); `platform_build.yml` skips fork PRs. All of them except `code_formatting.yml` also run on pushes to `main`, tags, `workflow_dispatch`, and a daily schedule; `code_formatting.yml` runs on PRs and daily. A fifth, `version_bump.yml`, runs after a PR is merged — see [Version Tagging](#version-tagging).
 
-**`code_formatting.yml`** — runs `./scripts/reformat_code` and fails if any files differ.
+**`code_formatting.yml`** — runs `uvx pre-commit run clang-format --all-files` and fails if the hook reformats any file.
 
 **`ci_build.yml`** — builds and tests four configurations on Ubuntu (x86 and ARM) and macOS:
 ```bash
@@ -121,13 +123,56 @@ cmake -B builds/Debug_nfm      -DCMAKE_BUILD_TYPE=Debug   -DNFM=TRUE -DBUILD_UNI
 cmake -B builds/Release        -DCMAKE_BUILD_TYPE=Release -DBUILD_UNITTESTS=TRUE
 cmake -B builds/Release_nfm    -DCMAKE_BUILD_TYPE=Release -DNFM=TRUE -DBUILD_UNITTESTS=TRUE
 ```
-Then runs `unittests` for all four, installs the Release+NFM build, and smoke-tests `rtl_airband -v`.
+Then runs `unittests` for all four, runs the system tests (`--mode thorough`) against the Release and Release+NFM builds, installs the Release+NFM build, and smoke-tests `rtl_airband -v`.
 
-**`platform_build.yml`** — builds and tests an AM Release configuration (`PLATFORM=native`) on a Pi 4B runner and an `ubuntu-22.04-arm` runner, then runs unit tests and system tests. (Pi 3B runner is currently disabled.)
+**`platform_build.yml`** — all self-hosted hardware. A single `airband-proxy` runner rsyncs the checkout to each Pi over SSH and runs build + unit tests + system tests there, so the Pis need no runner agent (32-bit ARM has no Node 24 after the Node 20 EOL):
+
+| Target | Arch | `PLATFORM` | `BCM_VC` | `--sudo` |
+|--------|------|------------|----------|----------|
+| `airband-4b` | 64-bit ARM | `native` | OFF | no |
+| `airband-3b` | 32-bit ARM | `rpiv2` | ON | yes |
+
+The workflow passes `--sudo` exactly when `BCM_VC=ON` (the VideoCore GPU FFT needs root). Each target's work dir is `~/rtlsdr-airband-ci` in the CI account's home (not a tmpfs, which is too small for the build tree and uv venv), reused across runs so builds stay warm; this relies on there being a single `airband-proxy` runner, which runs one job at a time.
+
+The proxy runner runs as user `airband-proxy` (`700` home, no sudo) and holds the targets' SSH key. On each Pi, CI logs in as `airband-build`, which has no password and either no sudo or, on BCM targets, a sudo rule for only the per-run `rtl_airband` binary. Build deps are **pre-installed** on the Pis, so the workflow never runs `install_dependencies` there. **Re-provision the Pis when `.github/install_dependencies` changes** — optional drivers (SoapySDR, PulseAudio) are auto-detected, so a stale target may silently build without them rather than fail.
+
+Provisioning:
+1. As `airband-proxy`, run `.github/setup_orchestrator_ssh` (creates the key, pins host keys, and writes the managed `~/.ssh/config.d/airband-ci`, prepending an `Include` for it to `~/.ssh/config`; don't hand-edit the managed file, it is regenerated on every run) and copy the `sudo PROXY_PUBKEY=… PROXY_FROM=… .github/setup_remote_test_target` command it prints for each target.
+2. Run that command on each Pi (installs deps, the `airband-build` login with the `from=`-restricted key, a `/test_data` tmpfs, and uv). On `BCM_VC` targets (`airband-3b`) add `RTL_SUDO=1` after `sudo` (`sudo RTL_SUDO=1 PROXY_PUBKEY=…`, since `sudo` drops variables set before it) to grant the `rtl_airband` sudo rule; without it the account gets no sudo.
+3. Re-run `.github/setup_orchestrator_ssh` to verify access.
+
+Self-hosted runner security (public repo): `platform_build` is the only self-hosted job and is gated with `if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository` so **fork** PRs never execute on the hardware — keep this guard on any self-hosted job. This complements the repo setting requiring approval for outside collaborators, network-segmented runners, and keeping repo secrets out of these workflows.
 
 **`build_docker_containers.yml`** — builds the multi-arch container image (`linux/amd64`, `386`, `arm64`, `arm/v6`, `arm/v7`), one job per platform via QEMU. Every image is smoke-tested (`rtl_airband -v`) under its target platform. On push/tag/schedule/`workflow_dispatch` the images are pushed by digest to GitHub Container Registry and the `merge` job combines the per-arch digests into a single manifest. Pull requests only build and smoke-test locally (`--load`); a fork PR gets a read-only `GITHUB_TOKEN`, so the registry push is denied. The `Prepare` step's `push` output gates this.
 
 **Before submitting a PR**, the pre-commit hooks cover most checks automatically. For build system or config changes not touching `src/`, verify all four cmake configurations build cleanly by hand.
+
+## Version Tagging
+
+`version_bump.yml` runs when a PR is **merged into `main`** and tags the merge commit with [`anothrNick/github-tag-action@1.64.0`](https://github.com/anothrNick/github-tag-action). Configured with `WITH_V: true` (tags look like `v5.3.0`) and `DEFAULT_BUMP: patch`.
+
+The action scans the **full commit message body of every commit between the previous tag and the merge commit** (`git log "$tag_commit".."$commit" --format=%B`) for a bump keyword, so the keyword can live in any commit in the PR — it does not have to be in the merge commit. "Previous tag" means the highest semver tag, not the most recent one by date:
+
+| Keyword in a commit message | Result |
+|------|--------|
+| `#major` | `v5.3.0` → `v6.0.0` |
+| `#minor` | `v5.3.0` → `v5.4.0` |
+| `#patch` | `v5.3.0` → `v5.3.1` |
+| `#none` | no tag is created |
+| none of the above | `DEFAULT_BUMP: patch` applies → `v5.3.1` |
+
+Rules when writing commit messages:
+
+- **Every merged PR creates a tag** unless a commit says `#none`. With `DEFAULT_BUMP: patch`, doing nothing still bumps the patch version, so add a keyword only to ask for something other than a patch.
+- **Add `#minor` for a new user-facing feature or a new config option.** Add `#major` for a breaking change — a removed or renamed config key, or changed default behavior.
+- **Highest keyword wins**, checked in the order `#major` → `#minor` → `#patch` → `#none`. One `#major` anywhere in the PR's commits bumps major even if other commits say `#minor`.
+- **Matching is a plain substring search over the whole message**, body included. Never write these tokens in prose (for example "fixed a #minor issue") — it will bump the version. Refer to them as "the #minor keyword" only outside commit messages.
+- **`#minor` and `#major` also publish a GitHub Release** with generated notes; `#patch` and the default bump only create the tag (`if: steps.tag.outputs.part != 'patch'`).
+- Squash-merging collapses the PR's commits into one message, so make sure the keyword survives into the squash message.
+
+After tagging, the workflow re-runs `ci_build.yml`, `platform_build.yml`, and `build_docker_containers.yml` against the new tag (a tag pushed with `GITHUB_TOKEN` does not fire their own `tags: ['v*']` triggers, so they have to be dispatched explicitly).
+
+Note that those three dispatch steps are unguarded: on a `#none` merge the action leaves `new_tag` at the **existing** tag, so they re-run against the previous release and republish its container images.
 
 ## System Tests
 
@@ -137,22 +182,20 @@ End-to-end tests live in `system_tests/`. They run the actual binary against gen
 # Run system tests (requires Release binaries — run scripts/run_unit_tests first)
 scripts/run_system_tests
 
-# Run manually from the system_tests directory
-cd system_tests
+# Run manually from the repo root
 uv sync
-uv run pytest tests/ \
-    --binary ../builds/Release/src/rtl_airband \
-    --nfm-binary ../builds/Release_nfm/src/rtl_airband \
+uv run pytest system_tests/tests/ \
+    --binary builds/Release/src/rtl_airband \
+    --nfm-binary builds/Release_nfm/src/rtl_airband \
     -v
 ```
 
-Python tooling (formatter, import sorter, linter) is configured in `system_tests/pyproject.toml` under `[tool.black]`, `[tool.isort]`, and `[tool.pylint]`. Run them manually:
+Python tooling (formatter, import sorter, linter) is configured in the repo-root `pyproject.toml` under `[tool.black]`, `[tool.isort]`, and `[tool.pylint]`. Run them manually from the repo root:
 
 ```bash
-cd system_tests
-uv run black .
-uv run isort .
-uv run pylint conftest.py helpers/ tests/
+uv run black system_tests/
+uv run isort system_tests/
+uv run pylint system_tests/conftest.py system_tests/helpers/ system_tests/tests/
 ```
 
 ## Architecture
@@ -176,7 +219,7 @@ SDR device (input-*.cpp)
 | `src/config.cpp` | libconfig++ parsing for devices, channels, mixers, outputs |
 | `src/output.cpp` | MP3 encoding, Icecast connections, file/UDP output |
 | `src/mixer.cpp` | Multi-channel mixer with ampfactor/balance |
-| `src/input-*.cpp` | SDR device drivers (rtlsdr, soapysdr, mirisdr, file) |
+| `src/input-*.cpp` | SDR device drivers (rtlsdr, soapysdr, file) |
 | `src/input-common.cpp/h` | Input device abstraction (`input_t` function-pointer interface) |
 | `src/filters.cpp/h` | IIR lowpass and notch filters |
 | `src/squelch.cpp/h` | Noise-power-based voice activity detection |
@@ -189,7 +232,7 @@ Each device operates in one of two modes, set via `mode = "multichannel"` (defau
 
 **`R_MULTICHANNEL`** — The SDR is tuned to a fixed center frequency and multiple channels are demodulated simultaneously from the same wideband capture. Each channel has a single `freq` value that must fall within the SDR's bandwidth. This is the common case for monitoring several frequencies at once.
 
-**`R_SCAN`** — The device has exactly one channel, but that channel holds a `freqs` list of frequencies to cycle through. A controller thread monitors the squelch: after ~2 seconds of no signal (10 × 200 ms polls), it retunes the SDR hardware to the next frequency via `input_set_centerfreq()`. When a signal is detected, it stays on the current frequency. Per-frequency labels, squelch thresholds, modulation, notch filters, and CTCSS settings are all supported in the `freqs` list. (`rtl_airband.cpp:101-140`, `config.cpp:825`)
+**`R_SCAN`** — The device has exactly one channel, but that channel holds a `freqs` list of frequencies to cycle through. A controller thread monitors the squelch: after ~2 seconds of no signal (10 × 200 ms polls), it retunes the SDR hardware to the next frequency via `input_set_centerfreq()`. When a signal is detected, it stays on the current frequency. Per-frequency settings (labels, `squelch_threshold`/`squelch_snr_threshold`, `modulations`, `notch`/`notch_q`, `ctcss`, `bandwidth`, `ampfactor`) are **parallel lists** to `freqs` (same index = same frequency), not a list of objects — `freqs` is parsed as numbers. Only one channel per device in scan mode. (`rtl_airband.cpp:101-140`, `config.cpp:312-729`)
 
 Samples already buffered or in flight at a retune still belong to the old frequency (`mark_retune()`, `stale_samples_after_retune()`). A retune usually lands mid-batch, so the demod loop records where those stale samples fall in the current `WAVE_BATCH` (`stale_window_t`) and `plan_retune_batch()` decides what to drop and when to switch `freq_idx`: everything up to the end of the stale samples is dropped in the batch where the switch happens, so no old-frequency audio reaches the new frequency's squelch. Measured on an RTL-SDR (R820T, 2.56 Msps), a retune shows up in the stream at most ~50 ms after the samples delivered when `rtlsdr_set_center_freq()` returns, within the one-USB-buffer (62.5 ms) allowance in `latency_bytes`.
 
@@ -209,14 +252,20 @@ Config files use libconfig++ syntax. Sample configs in `config/`. Top-level sect
 devices: ( { type = "rtlsdr"; centerfreq = 120.0; gain = 25;
              channels: ( { freq = 119.5; modulation = "AM";
                            outputs: ( { type = "icecast"; ... } ); } ); } );
-mixers: ( { name = "mix1"; inputs: ( { device=0; channel=0; ampfactor=1.0; } ); outputs: (...); } );
+mixers: { mix1: { outputs: ( { type = "icecast"; ... } ); } };
 ```
+
+Mixers have **no `inputs` section** — a channel connects to a mixer implicitly via an output `type = "mixer"` + `name` (+ optional `ampfactor`, `balance`), see `mixer_connect_input` (`src/config.cpp:168-193`, `src/mixer.cpp:57`).
 
 Output types: `icecast`, `file`, `rawfile`, `udp_stream`, `mixer`, `pulse`.
 
+`file`/`rawfile` outputs with `split_on_transmission = true` can set `split_include_transmission_start` (per output > global > default `false`; the global is parsed in `main()` in `src/rtl_airband.cpp`, the per-output value in `parse_split_file_times` in `src/config.cpp`). It changes only file names, never when files close. A transmission cut by `split_max_file_time` is named `<template>_<tx start>_<part start>[_<freq>]<suffix>`; part 1 repeats the tx start, and unsplit transmissions keep `<template>_<start>`. Names are built by `build_output_filename` (`src/output.cpp`). Part 1 is written under the standalone `.tmp` name and renamed to the part name in `close_if_necessary` when it is split; parts 2+ open under the part name, in the tx start's dated folder. A file that reaches max time while squelch is closed ends the transmission, as it always closed there. Examples: `config/split_include_transmission_start*.conf`.
+
+`split_tx_drop_shorter_than` (seconds, global or per output, default `0` = off, must be `< split_max_file_time`) deletes the `.tmp` file instead of renaming it when a transmission that fit in one file spans (first to last write) less than the limit; every part of a split transmission is kept. The check is in `close_if_necessary` (`should_drop_split_tx`), so files closed at shutdown are never dropped. Drops are counted per channel frequency in the stats file as `channel_split_tx_dropped_counter`.
+
 ### Stats / Metrics
 
-With `stats_filepath` set, the first output thread rewrites a Prometheus text-format file every 15 s and once more at exit (`write_stats_file()` in `output.cpp`). It is written to `<path>.tmp` and renamed into place. Rendering is table-driven (`freq_metrics[]`, `transmission_metrics[]`); the original metric names, help texts and label formatting must stay unchanged so existing dashboards keep working.
+With `stats_filepath` set, the first output thread rewrites a Prometheus text-format file every `stats_update_interval` seconds (default 15) and once more at exit (`write_stats_file()` in `output.cpp`). It is written to `<path>.tmp` and renamed into place. Rendering is table-driven (`freq_metrics[]`, `transmission_metrics[]`), so a new per-frequency metric is one row in `freq_metrics[]`; the original metric names, help texts and label formatting must stay unchanged so existing dashboards keep working.
 
 - Per-transmission stats: `Squelch` tracks each transmission from OPEN to CLOSED and flags `transmission_ended()` for one sample; the demod loop then records SNR (peak level vs. the noise floor when squelch opened) and duration into `freq_t::transmission_stats` (histograms).
 - Per-device input stats: the demod loop feeds only the newly consumed 8-bit bytes of each iteration to `device_t::input_stats` (clipped samples, sample count, power sum). Not collected for S16/F32 inputs.

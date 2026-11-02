@@ -18,7 +18,7 @@
       <td>x86_64 ubuntu-22.04</td>
       <td align="center"><a href="https://github.com/rtl-airband/RTLSDR-Airband/actions/workflows/ci_build.yml"><img src="https://github.com/rtl-airband/RTLSDR-Airband/actions/workflows/ci_build.yml/badge.svg?branch=main" alt="Run CI"></a></td>
       <td></td>
-      <td align="center" rowspan="10"><a href="https://github.com/rtl-airband/RTLSDR-Airband/actions/workflows/code_formatting.yml"><img src="https://github.com/rtl-airband/RTLSDR-Airband/actions/workflows/code_formatting.yml/badge.svg?branch=main" alt="Code Formatting"></a></td>
+      <td align="center" rowspan="11"><a href="https://github.com/rtl-airband/RTLSDR-Airband/actions/workflows/code_formatting.yml"><img src="https://github.com/rtl-airband/RTLSDR-Airband/actions/workflows/code_formatting.yml/badge.svg?branch=main" alt="Code Formatting"></a></td>
     </tr>
     <tr>
       <td>x86_64 ubuntu-24.04</td>
@@ -28,7 +28,7 @@
     <tr>
       <td>ARM64 ubuntu-22.04</td>
       <td align="center"><a href="https://github.com/rtl-airband/RTLSDR-Airband/actions/workflows/ci_build.yml"><img src="https://github.com/rtl-airband/RTLSDR-Airband/actions/workflows/ci_build.yml/badge.svg?branch=main" alt="Run CI"></a></td>
-      <td align="center"><a href="https://github.com/rtl-airband/RTLSDR-Airband/actions/workflows/platform_build.yml"><img src="https://github.com/rtl-airband/RTLSDR-Airband/actions/workflows/platform_build.yml/badge.svg?branch=main" alt="Platform Build"></a></td>
+      <td></td>
     </tr>
     <tr>
       <td>ARM64 ubuntu-24.04</td>
@@ -62,6 +62,11 @@
     </tr>
     <tr>
       <td>ARM64 Debian Trixie (Pi 4B)</td>
+      <td></td>
+      <td align="center"><a href="https://github.com/rtl-airband/RTLSDR-Airband/actions/workflows/platform_build.yml"><img src="https://github.com/rtl-airband/RTLSDR-Airband/actions/workflows/platform_build.yml/badge.svg?branch=main" alt="Platform Build"></a></td>
+    </tr>
+    <tr>
+      <td>ARM32 Debian Bookworm (Pi 3B)</td>
       <td></td>
       <td align="center"><a href="https://github.com/rtl-airband/RTLSDR-Airband/actions/workflows/platform_build.yml"><img src="https://github.com/rtl-airband/RTLSDR-Airband/actions/workflows/platform_build.yml/badge.svg?branch=main" alt="Platform Build"></a></td>
     </tr>
@@ -103,6 +108,20 @@ radios are now supported as well.
 ## Documentation
 
 User's manual is now on the [wiki](https://github.com/rtl-airband/RTLSDR-Airband/wiki).
+
+## Contributing
+
+Changes are merged through pull requests. Open a pull request from either a branch in
+this repository or from your own fork.
+
+Branches in this repository are named `<prefix>/<short_description>`, where the
+prefix is a username or a category such as `dev` or `fix` (e.g. `dev/drop_macos14_ci`,
+`fix/docker-ci-no-push-on-pr`).
+
+VSCode setup is provided, running in the devcontainer installs all dependencies. If
+developing locally, install the [pre-commit](https://pre-commit.com) hooks once after
+cloning (`pre-commit install`). NOTE: [uv](https://docs.astral.sh/uv/) needs to be
+installed to run the pre-commit hooks.
 
 ## Credits and thanks
 
