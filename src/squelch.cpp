@@ -59,6 +59,11 @@ Squelch::Squelch(void) {
     flappy_count_ = 0;
     low_signal_count_ = 0;
 
+    in_transmission_ = false;
+    transmission_ended_ = false;
+    current_transmission_ = {0.0f, 0.0f, 0};
+    last_transmission_ = {0.0f, 0.0f, 0};
+
     recent_sample_size_ = 1000;
     flap_opens_threshold_ = 3;
     recent_open_count_ = 0;
@@ -192,6 +197,14 @@ const size_t& Squelch::no_ctcss_count(void) const {
     return ctcss_slow_.not_found_count();
 }
 
+bool Squelch::transmission_ended(void) const {
+    return transmission_ended_;
+}
+
+const Squelch::Transmission& Squelch::last_transmission(void) const {
+    return last_transmission_;
+}
+
 void Squelch::process_raw_sample(const float& sample) {
     // Update current state based on previous state from last iteration
     update_current_state();
@@ -214,6 +227,11 @@ void Squelch::process_raw_sample(const float& sample) {
     }
 
     update_moving_avg(pre_filter_, sample);
+
+    if (in_transmission_) {
+        current_transmission_.sample_count++;
+        current_transmission_.peak_level = max(current_transmission_.peak_level, pre_filter_.full_);
+    }
 
     // Apply the comparison factor before adding to the buffer, will later be used as the threshold
     // for the post_filter_
@@ -361,6 +379,8 @@ void Squelch::set_state(State update) {
 }
 
 void Squelch::update_current_state(void) {
+    transmission_ended_ = false;
+
     if (next_state_ == OPENING) {
         if (current_state_ != OPENING) {
             debug_print("%zu: transitioning to OPENING\n", sample_count_);
@@ -432,11 +452,18 @@ void Squelch::update_current_state(void) {
         debug_print("%zu: transitioning to OPEN\n", sample_count_);
         open_count_++;
         current_state_ = next_state_;
+        in_transmission_ = true;
+        current_transmission_ = {pre_filter_.full_, noise_floor_, 0};
     } else if (next_state_ == CLOSED && current_state_ != CLOSED) {
         debug_print("%zu: transitioning to CLOSED\n", sample_count_);
         using_post_filter_ = false;
         closed_sample_count_ = 0;
         current_state_ = next_state_;
+        if (in_transmission_) {
+            in_transmission_ = false;
+            transmission_ended_ = true;
+            last_transmission_ = current_transmission_;
+        }
         ctcss_fast_.reset();
         ctcss_slow_.reset();
     } else if (next_state_ == CLOSED && current_state_ == CLOSED) {

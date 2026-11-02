@@ -181,6 +181,7 @@ SDR device (input-*.cpp)
 | `src/filters.cpp/h` | IIR lowpass and notch filters |
 | `src/squelch.cpp/h` | Noise-power-based voice activity detection |
 | `src/ctcss.cpp/h` | CTCSS tone detection |
+| `src/metrics.cpp/h` | Histogram, per-frequency transmission stats, per-device 8-bit input stats (clipping, power) and Prometheus text writers |
 
 ### Device Modes
 
@@ -189,6 +190,8 @@ Each device operates in one of two modes, set via `mode = "multichannel"` (defau
 **`R_MULTICHANNEL`** — The SDR is tuned to a fixed center frequency and multiple channels are demodulated simultaneously from the same wideband capture. Each channel has a single `freq` value that must fall within the SDR's bandwidth. This is the common case for monitoring several frequencies at once.
 
 **`R_SCAN`** — The device has exactly one channel, but that channel holds a `freqs` list of frequencies to cycle through. A controller thread monitors the squelch: after ~2 seconds of no signal (10 × 200 ms polls), it retunes the SDR hardware to the next frequency via `input_set_centerfreq()`. When a signal is detected, it stays on the current frequency. Per-frequency labels, squelch thresholds, modulation, notch filters, and CTCSS settings are all supported in the `freqs` list. (`rtl_airband.cpp:101-140`, `config.cpp:825`)
+
+Samples already buffered or in flight at a retune still belong to the old frequency (`mark_retune()`, `stale_samples_after_retune()`). A retune usually lands mid-batch, so the demod loop records where those stale samples fall in the current `WAVE_BATCH` (`stale_window_t`) and `plan_retune_batch()` decides what to drop and when to switch `freq_idx`: everything up to the end of the stale samples is dropped in the batch where the switch happens, so no old-frequency audio reaches the new frequency's squelch. Measured on an RTL-SDR (R820T, 2.56 Msps), a retune shows up in the stream at most ~50 ms after the samples delivered when `rtlsdr_set_center_freq()` returns, within the one-USB-buffer (62.5 ms) allowance in `latency_bytes`.
 
 ### Threading Model
 
@@ -211,6 +214,15 @@ mixers: ( { name = "mix1"; inputs: ( { device=0; channel=0; ampfactor=1.0; } ); 
 
 Output types: `icecast`, `file`, `rawfile`, `udp_stream`, `mixer`, `pulse`.
 
+### Stats / Metrics
+
+With `stats_filepath` set, the first output thread rewrites a Prometheus text-format file every 15 s and once more at exit (`write_stats_file()` in `output.cpp`). It is written to `<path>.tmp` and renamed into place. Rendering is table-driven (`freq_metrics[]`, `transmission_metrics[]`); the original metric names, help texts and label formatting must stay unchanged so existing dashboards keep working.
+
+- Per-transmission stats: `Squelch` tracks each transmission from OPEN to CLOSED and flags `transmission_ended()` for one sample; the demod loop then records SNR (peak level vs. the noise floor when squelch opened) and duration into `freq_t::transmission_stats` (histograms).
+- Per-device input stats: the demod loop feeds only the newly consumed 8-bit bytes of each iteration to `device_t::input_stats` (clipped samples, sample count, power sum). Not collected for S16/F32 inputs.
+- Stats are written by the demod thread only and read by the output thread; counters are atomics updated with relaxed load + store.
+- `freq_t` and `device_t` are `calloc`ed, so the stats members are constructed with placement new in `config.cpp`.
+
 ### Unit Tests
 
-Tests use Google Test (fetched via CMake FetchContent). Test files in `src/test_*.cpp` cover filters, squelch, CTCSS, helper functions, and signal generation. `src/test_base_class.h` provides test utilities.
+Tests use Google Test (fetched via CMake FetchContent). Test files in `src/test_*.cpp` cover filters, squelch, CTCSS, metrics, helper functions, and signal generation. `src/test_base_class.h` provides test utilities.

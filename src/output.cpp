@@ -637,238 +637,139 @@ void disable_device_outputs(device_t* dev) {
     }
 }
 
-static void print_channel_metric(FILE* f, char const* name, float freq, char* label) {
-    fprintf(f, "%s{freq=\"%.3f\"", name, freq / 1000000.0);
-    if (label != NULL) {
-        fprintf(f, ",label=\"%s\"", label);
+static std::string freq_labels(const freq_t& fparms) {
+    // the float cast matches what earlier versions printed, keeping existing series continuous
+    char freq[32];
+    snprintf(freq, sizeof(freq), "freq=\"%.3f\"", (float)fparms.frequency / 1000000.0);
+    std::string labels = freq;
+    if (fparms.label != NULL) {
+        labels += ",label=\"" + escape_label_value(fparms.label) + "\"";
     }
-    fprintf(f, "}");
+    return labels;
 }
 
-static void output_channel_noise_levels(FILE* f) {
-    fprintf(f,
-            "# HELP channel_noise_level Raw squelch noise_level.\n"
-            "# TYPE channel_noise_level gauge\n");
+static std::string index_label(const char* name, int index) {
+    return std::string(name) + "=\"" + std::to_string(index) + "\"";
+}
 
-    for (int i = 0; i < device_count; i++) {
-        device_t* dev = devices + i;
-        for (int j = 0; j < dev->channel_count; j++) {
-            channel_t* channel = devices[i].channels + j;
-            for (int k = 0; k < channel->freq_count; k++) {
-                print_channel_metric(f, "channel_noise_level", channel->freqlist[k].frequency, channel->freqlist[k].label);
-                fprintf(f, "\t%.3f\n", channel->freqlist[k].squelch.noise_level());
+struct freq_metric_t {
+    const char* name;
+    const char* type;
+    const char* help;
+    bool is_integer;
+    double (*value)(freq_t& fparms);
+};
+
+static const freq_metric_t freq_metrics[] = {
+    {"channel_activity_counter", "counter", "Loops of output_thread with frequency active.", true, [](freq_t& f) -> double { return f.active_counter; }},
+    {"channel_noise_level", "gauge", "Raw squelch noise_level.", false, [](freq_t& f) -> double { return f.squelch.noise_level(); }},
+    {"channel_dbfs_noise_level", "gauge", "Squelch noise_level as dBFS.", false, [](freq_t& f) -> double { return level_to_dBFS(f.squelch.noise_level()); }},
+    {"channel_signal_level", "gauge", "Raw squelch signal_level.", false, [](freq_t& f) -> double { return f.squelch.signal_level(); }},
+    {"channel_dbfs_signal_level", "gauge", "Squelch signal_level as dBFS.", false, [](freq_t& f) -> double { return level_to_dBFS(f.squelch.signal_level()); }},
+    {"channel_squelch_counter", "counter", "Squelch open_count.", true, [](freq_t& f) -> double { return f.squelch.open_count(); }},
+    {"channel_squelch_level", "gauge", "Squelch squelch_level.", false, [](freq_t& f) -> double { return f.squelch.squelch_level(); }},
+    {"channel_flappy_counter", "counter", "Squelch flappy_count.", true, [](freq_t& f) -> double { return f.squelch.flappy_count(); }},
+    {"channel_ctcss_counter", "counter", "count of windows with CTCSS detected.", true, [](freq_t& f) -> double { return f.squelch.ctcss_count(); }},
+    {"channel_no_ctcss_counter", "counter", "count of windows without CTCSS detected.", true, [](freq_t& f) -> double { return f.squelch.no_ctcss_count(); }},
+    {"channel_dbfs_squelch_level", "gauge", "Squelch squelch_level as dBFS.", false, [](freq_t& f) -> double { return level_to_dBFS(f.squelch.squelch_level()); }},
+};
+
+struct transmission_metric_t {
+    const char* name;
+    const char* help;
+    Histogram TransmissionStats::*histogram;
+};
+
+static const transmission_metric_t transmission_metrics[] = {
+    {"channel_transmission_snr_db", "Peak signal level of completed transmissions relative to the noise floor when squelch opened, in dB.", &TransmissionStats::snr_db},
+    {"channel_transmission_duration_seconds", "Duration of completed transmissions; _sum is the total airtime.", &TransmissionStats::duration_seconds},
+};
+
+static void output_freq_metrics(FILE* f) {
+    for (const freq_metric_t& metric : freq_metrics) {
+        write_metric_header(f, metric.name, metric.type, metric.help);
+        for (int i = 0; i < device_count; i++) {
+            for (int j = 0; j < devices[i].channel_count; j++) {
+                channel_t* channel = devices[i].channels + j;
+                for (int k = 0; k < channel->freq_count; k++) {
+                    freq_t& fparms = channel->freqlist[k];
+                    double value = metric.value(fparms);
+                    if (metric.is_integer) {
+                        write_sample(f, metric.name, freq_labels(fparms), (uint64_t)value);
+                    } else {
+                        write_sample(f, metric.name, freq_labels(fparms), value);
+                    }
+                }
             }
         }
+        fprintf(f, "\n");
     }
-    fprintf(f, "\n");
 }
 
-static void output_channel_dbfs_noise_levels(FILE* f) {
-    fprintf(f,
-            "# HELP channel_dbfs_noise_level Squelch noise_level as dBFS.\n"
-            "# TYPE channel_dbfs_noise_level gauge\n");
-
-    for (int i = 0; i < device_count; i++) {
-        device_t* dev = devices + i;
-        for (int j = 0; j < dev->channel_count; j++) {
-            channel_t* channel = devices[i].channels + j;
-            for (int k = 0; k < channel->freq_count; k++) {
-                print_channel_metric(f, "channel_dbfs_noise_level", channel->freqlist[k].frequency, channel->freqlist[k].label);
-                fprintf(f, "\t%.3f\n", level_to_dBFS(channel->freqlist[k].squelch.noise_level()));
+static void output_transmission_metrics(FILE* f) {
+    for (const transmission_metric_t& metric : transmission_metrics) {
+        write_metric_header(f, metric.name, "histogram", metric.help);
+        for (int i = 0; i < device_count; i++) {
+            for (int j = 0; j < devices[i].channel_count; j++) {
+                channel_t* channel = devices[i].channels + j;
+                for (int k = 0; k < channel->freq_count; k++) {
+                    freq_t& fparms = channel->freqlist[k];
+                    write_histogram(f, metric.name, freq_labels(fparms), fparms.transmission_stats.*metric.histogram);
+                }
             }
         }
+        fprintf(f, "\n");
     }
-    fprintf(f, "\n");
 }
 
-static void output_channel_signal_levels(FILE* f) {
-    fprintf(f,
-            "# HELP channel_signal_level Raw squelch signal_level.\n"
-            "# TYPE channel_signal_level gauge\n");
-
+static void output_device_metrics(FILE* f) {
+    write_metric_header(f, "buffer_overflow_count", "counter", "Number of times a device's buffer has overflowed.");
     for (int i = 0; i < device_count; i++) {
-        device_t* dev = devices + i;
-        for (int j = 0; j < dev->channel_count; j++) {
-            channel_t* channel = devices[i].channels + j;
-            for (int k = 0; k < channel->freq_count; k++) {
-                print_channel_metric(f, "channel_signal_level", channel->freqlist[k].frequency, channel->freqlist[k].label);
-                fprintf(f, "\t%.3f\n", channel->freqlist[k].squelch.signal_level());
-            }
-        }
+        write_sample(f, "buffer_overflow_count", index_label("device", i), (uint64_t)devices[i].input->overflow_count);
     }
     fprintf(f, "\n");
-}
 
-static void output_channel_dbfs_signal_levels(FILE* f) {
-    fprintf(f,
-            "# HELP channel_dbfs_signal_level Squelch signal_level as dBFS.\n"
-            "# TYPE channel_dbfs_signal_level gauge\n");
-
+    write_metric_header(f, "output_overrun_count", "counter", "Number of times a device or mixer output has overrun.");
     for (int i = 0; i < device_count; i++) {
-        device_t* dev = devices + i;
-        for (int j = 0; j < dev->channel_count; j++) {
-            channel_t* channel = devices[i].channels + j;
-            for (int k = 0; k < channel->freq_count; k++) {
-                print_channel_metric(f, "channel_dbfs_signal_level", channel->freqlist[k].frequency, channel->freqlist[k].label);
-                fprintf(f, "\t%.3f\n", level_to_dBFS(channel->freqlist[k].squelch.signal_level()));
-            }
-        }
-    }
-    fprintf(f, "\n");
-}
-
-static void output_channel_squelch_levels(FILE* f) {
-    fprintf(f,
-            "# HELP channel_squelch_level Squelch squelch_level.\n"
-            "# TYPE channel_squelch_level gauge\n");
-
-    for (int i = 0; i < device_count; i++) {
-        device_t* dev = devices + i;
-        for (int j = 0; j < dev->channel_count; j++) {
-            channel_t* channel = devices[i].channels + j;
-            for (int k = 0; k < channel->freq_count; k++) {
-                print_channel_metric(f, "channel_squelch_level", channel->freqlist[k].frequency, channel->freqlist[k].label);
-                fprintf(f, "\t%.3f\n", channel->freqlist[k].squelch.squelch_level());
-            }
-        }
-    }
-    fprintf(f, "\n");
-}
-
-static void output_channel_squelch_counter(FILE* f) {
-    fprintf(f,
-            "# HELP channel_squelch_counter Squelch open_count.\n"
-            "# TYPE channel_squelch_counter counter\n");
-
-    for (int i = 0; i < device_count; i++) {
-        device_t* dev = devices + i;
-        for (int j = 0; j < dev->channel_count; j++) {
-            channel_t* channel = devices[i].channels + j;
-            for (int k = 0; k < channel->freq_count; k++) {
-                print_channel_metric(f, "channel_squelch_counter", channel->freqlist[k].frequency, channel->freqlist[k].label);
-                fprintf(f, "\t%zu\n", channel->freqlist[k].squelch.open_count());
-            }
-        }
-    }
-    fprintf(f, "\n");
-}
-
-static void output_channel_flappy_counter(FILE* f) {
-    fprintf(f,
-            "# HELP channel_flappy_counter Squelch flappy_count.\n"
-            "# TYPE channel_flappy_counter counter\n");
-
-    for (int i = 0; i < device_count; i++) {
-        device_t* dev = devices + i;
-        for (int j = 0; j < dev->channel_count; j++) {
-            channel_t* channel = devices[i].channels + j;
-            for (int k = 0; k < channel->freq_count; k++) {
-                print_channel_metric(f, "channel_flappy_counter", channel->freqlist[k].frequency, channel->freqlist[k].label);
-                fprintf(f, "\t%zu\n", channel->freqlist[k].squelch.flappy_count());
-            }
-        }
-    }
-    fprintf(f, "\n");
-}
-
-static void output_channel_ctcss_counter(FILE* f) {
-    fprintf(f,
-            "# HELP channel_ctcss_counter count of windows with CTCSS detected.\n"
-            "# TYPE channel_ctcss_counter counter\n");
-
-    for (int i = 0; i < device_count; i++) {
-        device_t* dev = devices + i;
-        for (int j = 0; j < dev->channel_count; j++) {
-            channel_t* channel = devices[i].channels + j;
-            for (int k = 0; k < channel->freq_count; k++) {
-                print_channel_metric(f, "channel_ctcss_counter", channel->freqlist[k].frequency, channel->freqlist[k].label);
-                fprintf(f, "\t%zu\n", channel->freqlist[k].squelch.ctcss_count());
-            }
-        }
-    }
-    fprintf(f, "\n");
-}
-
-static void output_channel_no_ctcss_counter(FILE* f) {
-    fprintf(f,
-            "# HELP channel_no_ctcss_counter count of windows without CTCSS detected.\n"
-            "# TYPE channel_no_ctcss_counter counter\n");
-
-    for (int i = 0; i < device_count; i++) {
-        device_t* dev = devices + i;
-        for (int j = 0; j < dev->channel_count; j++) {
-            channel_t* channel = devices[i].channels + j;
-            for (int k = 0; k < channel->freq_count; k++) {
-                print_channel_metric(f, "channel_no_ctcss_counter", channel->freqlist[k].frequency, channel->freqlist[k].label);
-                fprintf(f, "\t%zu\n", channel->freqlist[k].squelch.no_ctcss_count());
-            }
-        }
-    }
-    fprintf(f, "\n");
-}
-
-static void output_channel_activity_counters(FILE* f) {
-    fprintf(f,
-            "# HELP channel_activity_counter Loops of output_thread with frequency active.\n"
-            "# TYPE channel_activity_counter counter\n");
-
-    for (int i = 0; i < device_count; i++) {
-        device_t* dev = devices + i;
-        for (int j = 0; j < dev->channel_count; j++) {
-            channel_t* channel = devices[i].channels + j;
-            for (int k = 0; k < channel->freq_count; k++) {
-                print_channel_metric(f, "channel_activity_counter", channel->freqlist[k].frequency, channel->freqlist[k].label);
-                fprintf(f, "\t%zu\n", channel->freqlist[k].active_counter);
-            }
-        }
-    }
-    fprintf(f, "\n");
-}
-
-static void output_device_buffer_overflows(FILE* f) {
-    fprintf(f,
-            "# HELP buffer_overflow_count Number of times a device's buffer has overflowed.\n"
-            "# TYPE buffer_overflow_count counter\n");
-
-    for (int i = 0; i < device_count; i++) {
-        device_t* dev = devices + i;
-        fprintf(f, "buffer_overflow_count{device=\"%d\"}\t%zu\n", i, dev->input->overflow_count);
-    }
-    fprintf(f, "\n");
-}
-
-static void output_output_overruns(FILE* f) {
-    fprintf(f,
-            "# HELP output_overrun_count Number of times a device or mixer output has overrun.\n"
-            "# TYPE output_overrun_count counter\n");
-
-    for (int i = 0; i < device_count; i++) {
-        device_t* dev = devices + i;
-        fprintf(f, "output_overrun_count{device=\"%d\"}\t%zu\n", i, dev->output_overrun_count);
+        write_sample(f, "output_overrun_count", index_label("device", i), (uint64_t)devices[i].output_overrun_count);
     }
     for (int i = 0; i < mixer_count; i++) {
-        mixer_t* mixer = mixers + i;
-        fprintf(f, "output_overrun_count{mixer=\"%d\"}\t%zu\n", i, mixer->output_overrun_count);
+        write_sample(f, "output_overrun_count", index_label("mixer", i), (uint64_t)mixers[i].output_overrun_count);
+    }
+    fprintf(f, "\n");
+
+    if (mixer_count > 0) {
+        write_metric_header(f, "input_overrun_count", "counter", "Number of times mixer input has overrun.");
+        for (int i = 0; i < mixer_count; i++) {
+            for (int j = 0; j < mixers[i].input_count; j++) {
+                write_sample(f, "input_overrun_count", index_label("mixer", i) + "," + index_label("input", j), (uint64_t)mixers[i].inputs[j].input_overrun_count);
+            }
+        }
+        fprintf(f, "\n");
+    }
+}
+
+template <typename T>
+static void output_input_metric(FILE* f, const char* name, const char* help, std::atomic<T> InputStats::*counter) {
+    write_metric_header(f, name, "counter", help);
+    for (int i = 0; i < device_count; i++) {
+        if (devices[i].input->bytes_per_sample == 1) {
+            write_sample(f, name, index_label("device", i), (devices[i].input_stats.*counter).load(std::memory_order_relaxed));
+        }
     }
     fprintf(f, "\n");
 }
 
-static void output_input_overruns(FILE* f) {
-    if (mixer_count == 0) {
-        return;
-    }
+static void output_input_metrics(FILE* f) {
+    output_input_metric(f, "device_samples_total", "Complex I/Q samples read from an 8-bit device.", &InputStats::samples);
+    output_input_metric(f, "device_clipped_samples_total", "Complex I/Q samples where I or Q was at the ADC rail; a rising rate means the gain is too high.", &InputStats::clipped_samples);
+    output_input_metric(f, "device_input_power_sum_total", "Sum of I/Q sample power, normalized so full scale is 1.0; divide its rate by the rate of device_samples_total for mean power.",
+                        &InputStats::power_sum);
+}
 
-    fprintf(f,
-            "# HELP input_overrun_count Number of times mixer input has overrun.\n"
-            "# TYPE input_overrun_count counter\n");
-
-    for (int i = 0; i < mixer_count; i++) {
-        mixer_t* mixer = mixers + i;
-        for (int j = 0; j < mixer->input_count; j++) {
-            mixinput_t* input = mixer->inputs + j;
-            fprintf(f, "input_overrun_count{mixer=\"%d\",input=\"%d\"}\t%zu\n", i, j, input->input_overrun_count);
-        }
-    }
+static void output_build_info(FILE* f) {
+    write_metric_header(f, "rtl_airband_build_info", "gauge", "Always 1, labeled with the running version.");
+    write_sample(f, "rtl_airband_build_info", std::string("version=\"") + escape_label_value(RTL_AIRBAND_VERSION) + "\"", (uint64_t)1);
     fprintf(f, "\n");
 }
 
@@ -887,27 +788,23 @@ void write_stats_file(timeval* last_stats_write) {
 
     *last_stats_write = current_time;
 
-    FILE* file = fopen(stats_filepath, "w");
+    // write to a temporary file and rename it into place, so readers never see a partial file
+    std::string tmp_filepath = std::string(stats_filepath) + ".tmp";
+    FILE* file = fopen(tmp_filepath.c_str(), "w");
     if (!file) {
-        log(LOG_WARNING, "Cannot open output file %s (%s)\n", stats_filepath, strerror(errno));
+        log(LOG_WARNING, "Cannot open output file %s (%s)\n", tmp_filepath.c_str(), strerror(errno));
         return;
     }
 
-    output_channel_activity_counters(file);
-    output_channel_noise_levels(file);
-    output_channel_dbfs_noise_levels(file);
-    output_channel_signal_levels(file);
-    output_channel_dbfs_signal_levels(file);
-    output_channel_squelch_counter(file);
-    output_channel_squelch_levels(file);
-    output_channel_flappy_counter(file);
-    output_channel_ctcss_counter(file);
-    output_channel_no_ctcss_counter(file);
-    output_device_buffer_overflows(file);
-    output_output_overruns(file);
-    output_input_overruns(file);
+    output_freq_metrics(file);
+    output_device_metrics(file);
+    output_transmission_metrics(file);
+    output_input_metrics(file);
+    output_build_info(file);
 
-    fclose(file);
+    if (fclose(file) != 0 || rename(tmp_filepath.c_str(), stats_filepath) != 0) {
+        log(LOG_WARNING, "Cannot write output file %s (%s)\n", stats_filepath, strerror(errno));
+    }
 }
 
 void* output_thread(void* param) {

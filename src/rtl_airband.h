@@ -45,8 +45,10 @@
 #endif /* WITH_PULSEAUDIO */
 
 #include "filters.h"
-#include "input-common.h"  // input_t
+#include "helper_functions.h"  // stale_window_t
+#include "input-common.h"      // input_t
 #include "logging.h"
+#include "metrics.h"
 #include "squelch.h"
 
 #define ALIGNED32 __attribute__((aligned(32)))
@@ -259,7 +261,8 @@ struct freq_t {
     float agcavgfast;  // average power, for AGC
     float ampfactor;   // multiplier to increase / decrease volume
     Squelch squelch;
-    size_t active_counter;         // count of loops where channel has signal
+    size_t active_counter;  // count of loops where channel has signal
+    TransmissionStats transmission_stats;
     NotchFilter notch_filter;      // notch filter - good to remove CTCSS tones
     LowpassFilter lowpass_filter;  // lowpass filter, applied to I/Q after derotation, set at bandwidth/2 to remove out of band noise
     enum modulations modulation;
@@ -314,17 +317,18 @@ struct device_t {
     int failed;
     enum rec_modes mode;
     size_t output_overrun_count;
+    InputStats input_stats;  // only updated for 8-bit sample formats
     // Scan mode retune bookkeeping.  Written by the controller thread on retune,
     // consumed by the (single) demod thread that owns this device.
     //
     // tune_stale_samples: wave samples still to be consumed that predate the last retune
     // clean_samples_since_tune: post-retune wave samples demodulated, saturated at SCAN_MIN_CLEAN_SAMPLES
     // signal_count: incremented per batch in which squelch opened on post-retune samples
-    // stale_this_batch: demod thread only - pre-retune samples at the head of the batch being processed
+    // stale_window: demod thread only - where the pre-retune samples are in the batch being collected
     volatile int tune_stale_samples;
     volatile unsigned int clean_samples_since_tune;
     volatile unsigned int signal_count;
-    int stale_this_batch;
+    stale_window_t stale_window;
 };
 
 struct mixinput_t {
