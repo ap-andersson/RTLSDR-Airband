@@ -47,13 +47,21 @@ WORKDIR /rtl_airband_build
 # copy in the rtl_airband source, coping in the full repo so find_version will be correct
 COPY ./ .
 
-# configure and build
-# TODO: detect platforms
-RUN cmake -B build_dir -DPLATFORM=generic -DCMAKE_BUILD_TYPE=Release -DNFM=TRUE -DBUILD_UNITTESTS=TRUE && \
-    VERBOSE=1 cmake --build build_dir -j4
+# NFM support also doubles the audio rate (WAVE_RATE 8 -> 16 kHz); build with --build-arg NFM=FALSE
+# for AM-only use with 8 kHz audio
+ARG NFM=TRUE
+ARG TARGETARCH
+ARG TARGETVARIANT
 
-# make sure unit tests pass
-RUN ./build_dir/src/unittests
+# configure, build and run the unit tests
+# TODO: detect platforms
+# The build tree lives in a cache mount (one per architecture), so rebuilding after a source change
+# only recompiles what changed. A cache mount is not part of the image, so copy the binaries out.
+RUN --mount=type=cache,id=rtl-airband-build-${TARGETARCH}${TARGETVARIANT},target=/rtl_airband_build/build_dir \
+    cmake -B build_dir -DPLATFORM=generic -DCMAKE_BUILD_TYPE=Release -DNFM=${NFM} -DBUILD_UNITTESTS=TRUE && \
+    VERBOSE=1 cmake --build build_dir -j4 && \
+    ./build_dir/src/unittests && \
+    mkdir -p /out && cp build_dir/src/rtl_airband build_dir/src/unittests /out/
 
 
 # application container
@@ -84,8 +92,8 @@ RUN mkdir -p /etc/modprobe.d && \
 
 # Copy rtl_airband from the build container
 COPY LICENSE /app/
-COPY --from=build /rtl_airband_build/build_dir/src/unittests /app/
-COPY --from=build /rtl_airband_build/build_dir/src/rtl_airband /app/
+COPY --from=build /out/unittests /app/
+COPY --from=build /out/rtl_airband /app/
 RUN chmod a+x /app/unittests /app/rtl_airband
 
 # make sure unit tests pass
