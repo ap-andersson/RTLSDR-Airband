@@ -8,6 +8,7 @@ dependencies = [
     "pytest-xdist>=3.0",
     "numpy>=2.0",
     "mutagen>=1.45",
+    "prometheus-client>=0.20",
 ]
 
 [tool.uv]

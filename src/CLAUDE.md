@@ -47,3 +47,17 @@ With `stats_filepath` set, the first output thread rewrites a Prometheus text-fo
 - Per-device input stats: the demod loop feeds only the newly consumed 8-bit bytes of each iteration to `device_t::input_stats` (clipped samples, sample count, power sum). Not collected for S16/F32 inputs.
 - Stats are written by the demod thread only and read by the output thread; counters are atomics updated with relaxed load + store.
 - `freq_t` and `device_t` are `calloc`ed, so the stats members are constructed with placement new in `config.cpp`.
+
+`write_metrics()` in `output.cpp` produces the whole text; the stats file and the HTTP endpoint both use it, so they always contain the same metrics.
+
+### HTTP endpoint (`metrics_listen`)
+
+With `metrics_listen = "host:port";` (also `"[::1]:9101"`, or `":9101"` for all interfaces, IPv6 dual-stack where available) rtl_airband serves the metrics at `GET /metrics` (and `HEAD`), independent of `stats_filepath`. The code is in `src/metrics_server.cpp/h`:
+
+- `MetricsServer` is a deliberately minimal HTTP/1.1 server on its own `std::thread`: one connection at a time, one request per connection (`Connection: close`), an 8 KiB request-head limit (431) and a 5 s per-request deadline. It is bound after daemonizing; a bind failure aborts startup. `main()` stops it before joining the output threads.
+- The HTTP thread never touches channel state. `MetricsExchange` hands the request to the first output thread (`device_start == 0`, the same one that writes the stats file), which checks the lock-free `pending()` once per loop (~125 ms), renders with `open_memstream()` and publishes. A render counts only if it started after the request (`begin_render()` generation), so a scrape never gets data older than itself. If the output thread does not answer within 2 s the request gets 503.
+- `handle_metrics_request()` and `parse_listen_address()` are pure functions, unit tested in `src/test_metrics_server.cpp`; `system_tests/tests/test_metrics_endpoint.py` scrapes a running binary and parses the response with `prometheus_client`.
+
+`channel_squelch_open` is written by `output_squelch_open_metric()` rather than a `freq_metrics[]` row, because in scan mode it needs the channel's `freq_idx`: a frequency the scanner has left keeps its squelch's last state, so only the tuned one may report 1.
+
+Non-finite values are written as `NaN`, `+Inf` and `-Inf` (printf's `-nan` is rejected by Prometheus parsers).

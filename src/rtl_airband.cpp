@@ -85,6 +85,9 @@ bool multiple_output_threads = false;
 bool log_scan_activity = false;
 char* stats_filepath = NULL;
 double stats_update_interval = 15.0;
+char* metrics_listen = NULL;
+MetricsExchange metrics_exchange;
+static MetricsServer metrics_server;
 double global_split_min_file_time = 1.0;
 double global_split_max_file_time = 60.0 * 60.0;
 double global_split_max_idle_time = 0.5;
@@ -946,6 +949,18 @@ int main(int argc, char* argv[]) {
         }
         if (root.exists("stats_update_interval") && !stats_filepath)
             cerr << "Warning: stats_update_interval is ignored without stats_filepath\n";
+        if (root.exists("metrics_listen")) {
+            if (root["metrics_listen"].getType() != Setting::TypeString) {
+                cerr << "Configuration error: metrics_listen must be a string such as \"0.0.0.0:9101\"\n";
+                error();
+            }
+            metrics_listen = strdup(root["metrics_listen"]);
+            string host, port, err;
+            if (!parse_listen_address(metrics_listen, &host, &port, &err)) {
+                cerr << "Configuration error: metrics_listen \"" << metrics_listen << "\": " << err << "\n";
+                error();
+            }
+        }
         parse_global_double(root, "split_min_file_time", &global_split_min_file_time);
         parse_global_double(root, "split_max_file_time", &global_split_max_file_time);
         parse_global_double(root, "split_max_idle_time", &global_split_max_idle_time);
@@ -1081,6 +1096,17 @@ int main(int argc, char* argv[]) {
                 }
             }
         }
+    }
+
+    if (metrics_listen) {
+        string host, port, err;
+        parse_listen_address(metrics_listen, &host, &port, &err);
+        auto handler = [](const string& head) { return handle_metrics_request(head, [](string* text) { return metrics_exchange.request(text, std::chrono::milliseconds(2000)); }); };
+        if (!metrics_server.start(host, port, handler, &err)) {
+            log(LOG_ERR, "Cannot listen for metrics on %s: %s\n", metrics_listen, err.c_str());
+            error();
+        }
+        log(LOG_INFO, "Serving metrics at http://%s/metrics\n", metrics_listen);
     }
 
     for (int i = 0; i < mixer_count; i++) {
@@ -1245,6 +1271,8 @@ int main(int argc, char* argv[]) {
         log(LOG_INFO, "Closing mixer thread\n");
         pthread_join(mixer, NULL);
     }
+
+    metrics_server.stop();
 
     log(LOG_INFO, "Closing output thread(s)\n");
     for (int i = 0; i < output_thread_count; i++) {

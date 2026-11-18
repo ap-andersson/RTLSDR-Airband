@@ -85,6 +85,7 @@ def write_config(
     stats_filepath: Path | None = None,
     stats_update_interval: float | None = None,
     split_times: dict | None = None,
+    metrics_listen: str | None = None,
 ) -> None:
     """
     Write a minimal libconfig++-format .conf file for rtl_airband.
@@ -127,6 +128,8 @@ def write_config(
             file to this path on shutdown.
         stats_update_interval: If provided, how often (seconds) the stats file
             is rewritten while running.
+        metrics_listen: If provided, the address ("host:port") rtl_airband serves
+            Prometheus metrics on at /metrics while running.
         split_times: If provided, top-level split settings written as global
             config keys (split_min_file_time / split_max_file_time /
             split_max_idle_time / split_include_transmission_start).
@@ -207,5 +210,7 @@ def write_config(
         lines.append(f'stats_filepath = "{stats_filepath}";')
     if stats_update_interval is not None:
         lines.append(f"stats_update_interval = {stats_update_interval};")
+    if metrics_listen is not None:
+        lines.append(f'metrics_listen = "{metrics_listen}";')
 
     config_path.write_text("\n".join(lines) + "\n")

@@ -873,6 +873,55 @@ static void output_build_info(FILE* f) {
     fprintf(f, "\n");
 }
 
+static void output_squelch_open_metric(FILE* f) {
+    write_metric_header(f, "channel_squelch_open", "gauge", "1 while the squelch is open on this frequency, else 0. In scan mode only the frequency currently tuned can be open.");
+    for (int i = 0; i < device_count; i++) {
+        for (int j = 0; j < devices[i].channel_count; j++) {
+            channel_t* channel = devices[i].channels + j;
+            for (int k = 0; k < channel->freq_count; k++) {
+                freq_t& fparms = channel->freqlist[k];
+                // a scanned frequency's squelch keeps its last state after the scanner moves on
+                const bool tuned = devices[i].mode != R_SCAN || k == channel->freq_idx;
+                write_sample(f, "channel_squelch_open", freq_labels(fparms), (uint64_t)(tuned && fparms.squelch.is_open() ? 1 : 0));
+            }
+        }
+    }
+    fprintf(f, "\n");
+}
+
+static void write_metrics(FILE* f) {
+    output_freq_metrics(f);
+    output_squelch_open_metric(f);
+    output_device_metrics(f);
+    output_transmission_metrics(f);
+    output_input_metrics(f);
+    output_build_info(f);
+}
+
+static std::string render_metrics(void) {
+    char* buf = NULL;
+    size_t len = 0;
+    FILE* f = open_memstream(&buf, &len);
+    if (!f) {
+        log(LOG_WARNING, "Cannot render metrics (%s)\n", strerror(errno));
+        return "";
+    }
+    write_metrics(f);
+    fclose(f);
+    std::string text(buf, len);
+    free(buf);
+    return text;
+}
+
+// Answers a pending /metrics request from this thread, which already owns reading the channel state
+static void serve_metrics_request(void) {
+    if (!metrics_exchange.pending()) {
+        return;
+    }
+    uint64_t generation = metrics_exchange.begin_render();
+    metrics_exchange.publish(generation, render_metrics());
+}
+
 void write_stats_file(timeval* last_stats_write) {
     if (!stats_filepath) {
         return;
@@ -895,11 +944,7 @@ void write_stats_file(timeval* last_stats_write) {
         return;
     }
 
-    output_freq_metrics(file);
-    output_device_metrics(file);
-    output_transmission_metrics(file);
-    output_input_metrics(file);
-    output_build_info(file);
+    write_metrics(file);
 
     if (fclose(file) != 0 || rename(tmp_filepath.c_str(), stats_filepath) != 0) {
         log(LOG_WARNING, "Cannot write output file %s (%s)\n", stats_filepath, strerror(errno));
@@ -965,6 +1010,7 @@ void* output_thread(void* param) {
         }
         if (output_param->device_start == 0) {
             write_stats_file(&last_stats_write);
+            serve_metrics_request();
         }
     }
 

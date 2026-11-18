@@ -276,6 +276,7 @@ add_library (rtl_airband_base OBJECT
 	squelch.cpp
 	ctcss.cpp
 	metrics.cpp
+	metrics_server.cpp
 	util.cpp
 	udp_stream.cpp
 	logging.cpp
@@ -346,6 +347,7 @@ if(BUILD_UNITTESTS)
 	list(APPEND TEST_FILES
 		squelch.cpp
 		metrics.cpp
+		metrics_server.cpp
 		logging.cpp
 		filters.cpp
 		ctcss.cpp

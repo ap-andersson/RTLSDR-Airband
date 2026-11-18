@@ -49,6 +49,7 @@
 #include "input-common.h"      // input_t
 #include "logging.h"
 #include "metrics.h"
+#include "metrics_server.h"
 #include "squelch.h"
 
 #define ALIGNED32 __attribute__((aligned(32)))
@@ -402,6 +403,8 @@ extern bool multiple_demod_threads;
 extern bool multiple_output_threads;
 extern char* stats_filepath;
 extern double stats_update_interval;
+extern char* metrics_listen;
+extern MetricsExchange metrics_exchange;
 extern double global_split_min_file_time;
 extern double global_split_max_file_time;
 extern double global_split_max_idle_time;

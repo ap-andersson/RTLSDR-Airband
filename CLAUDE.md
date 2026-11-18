@@ -158,4 +158,4 @@ Device modes, the threading model, and the config format are documented in `src/
 
 ### Unit Tests
 
-Tests use Google Test (fetched via CMake FetchContent). Test files in `src/test_*.cpp` cover filters, squelch, CTCSS, metrics, helper functions, and signal generation. `src/test_base_class.h` provides test utilities.
+Tests use Google Test (fetched via CMake FetchContent). Test files in `src/test_*.cpp` cover filters, squelch, CTCSS, metrics, the metrics HTTP server, helper functions, and signal generation. `src/test_base_class.h` provides test utilities.

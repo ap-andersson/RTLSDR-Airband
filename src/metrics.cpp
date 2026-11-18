@@ -19,6 +19,8 @@
 
 #include <inttypes.h>
 
+#include <cmath>
+
 using namespace std;
 
 template <typename T>
@@ -108,7 +110,13 @@ static void write_name(FILE* f, const char* name, const string& labels) {
 
 void write_sample(FILE* f, const char* name, const string& labels, double value) {
     write_name(f, name, labels);
-    fprintf(f, "\t%.3f\n", value);
+    if (isnan(value)) {
+        fprintf(f, "\tNaN\n");
+    } else if (isinf(value)) {
+        fprintf(f, "\t%sInf\n", value > 0 ? "+" : "-");
+    } else {
+        fprintf(f, "\t%.3f\n", value);
+    }
 }
 
 void write_sample(FILE* f, const char* name, const string& labels, uint64_t value) {

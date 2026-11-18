@@ -17,6 +17,7 @@
 
 #include "test_base_class.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -144,6 +145,14 @@ TEST_F(MetricsTest, write_sample_formats) {
     EXPECT_EQ(capture([](FILE* f) { write_sample(f, "level", "freq=\"1.000\"", 1.23456); }), "level{freq=\"1.000\"}\t1.235\n");
     EXPECT_EQ(capture([](FILE* f) { write_sample(f, "count", "device=\"0\"", (uint64_t)42); }), "count{device=\"0\"}\t42\n");
     EXPECT_EQ(capture([](FILE* f) { write_sample(f, "info", "", (uint64_t)1); }), "info\t1\n");
+}
+
+TEST_F(MetricsTest, write_sample_non_finite_uses_prometheus_spelling) {
+    // printf would write "inf", "-inf" and "-nan"; Prometheus parsers reject "-nan"
+    EXPECT_EQ(capture([](FILE* f) { write_sample(f, "x", "", INFINITY); }), "x\t+Inf\n");
+    EXPECT_EQ(capture([](FILE* f) { write_sample(f, "x", "", -INFINITY); }), "x\t-Inf\n");
+    EXPECT_EQ(capture([](FILE* f) { write_sample(f, "x", "", NAN); }), "x\tNaN\n");
+    EXPECT_EQ(capture([](FILE* f) { write_sample(f, "x", "", -NAN); }), "x\tNaN\n");
 }
 
 TEST_F(MetricsTest, write_histogram) {
