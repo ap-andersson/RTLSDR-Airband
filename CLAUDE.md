@@ -92,6 +92,12 @@ Hooks are defined in `.pre-commit-config.yaml`. The build/unit-test hook runs wh
 
 ## CI and Pull Request Checks
 
+**In this fork** (ap-andersson/RTLSDR-Airband) the upstream workflows below only run by hand
+(`workflow_dispatch`; their triggers are commented out, to keep merges from upstream simple), since the
+fork has no self-hosted runners. The fork's own `.github/workflows/fork_image.yml` builds the AM-only
+image (`NFM=FALSE`) for amd64 and arm64 on pushes to `main` and publishes it as
+`ghcr.io/ap-andersson/rtlsdr-airband:latest` and `:sha-<commit>`. What follows describes upstream's CI.
+
 Workflows live in `.github/workflows/`. The self-hosted Pi runners, their provisioning, and the Docker image are covered by the `ci-and-docker` skill (`.claude/skills/ci-and-docker/`).
 
 Self-hosted runner security (public repo): `platform_build` is the only self-hosted job and is gated with `if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository` so **fork** PRs never execute on the hardware — keep this guard on any self-hosted job. This complements the repo setting requiring approval for outside collaborators, network-segmented runners, and keeping repo secrets out of these workflows.

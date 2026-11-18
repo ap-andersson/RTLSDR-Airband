@@ -1,13 +1,17 @@
 name: Build and Publish Containers
 
+# Disabled in this fork: it builds its own image in fork_image.yml, and has no self-hosted
+# runners. Upstream's triggers are kept as comments so merges from upstream stay simple.
 on:
-  push:
-    branches: [main]
-    tags: ['v*']
-  pull_request:
   workflow_dispatch:
-  schedule:
-    - cron: '29 13 * * *' # run daily
+#on:
+#  push:
+#    branches: [main]
+#    tags: ['v*']
+#  pull_request:
+#  workflow_dispatch:
+#  schedule:
+#    - cron: '29 13 * * *' # run daily
 
 jobs:
   build:

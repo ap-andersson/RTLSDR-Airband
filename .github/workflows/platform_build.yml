@@ -3,14 +3,18 @@ name: Platform Build
 # All self-hosted hardware testing: the airband-proxy runner drives each Pi over
 # SSH. See "CI and Pull Request Checks" in CLAUDE.md for the setup and provisioning.
 
+# Disabled in this fork: it builds its own image in fork_image.yml, and has no self-hosted
+# runners. Upstream's triggers are kept as comments so merges from upstream stay simple.
 on:
-  push:
-    branches: [main]
-    tags: ['v*']
-  pull_request:
   workflow_dispatch:
-  schedule:
-    - cron: '39 13 * * *' # run daily
+#on:
+#  push:
+#    branches: [main]
+#    tags: ['v*']
+#  pull_request:
+#  workflow_dispatch:
+#  schedule:
+#    - cron: '39 13 * * *' # run daily
 
 permissions:
   contents: read

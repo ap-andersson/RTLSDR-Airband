@@ -1,9 +1,13 @@
 name: Code Formatting
 
+# Disabled in this fork: it builds its own image in fork_image.yml, and has no self-hosted
+# runners. Upstream's triggers are kept as comments so merges from upstream stay simple.
 on:
-  pull_request:
-  schedule:
-    - cron: '39 13 * * *' # run daily
+  workflow_dispatch:
+#on:
+#  pull_request:
+#  schedule:
+#    - cron: '39 13 * * *' # run daily
 
 jobs:
   code_formatting:
