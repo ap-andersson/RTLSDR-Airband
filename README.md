@@ -1,5 +1,64 @@
 # RTLSDR-Airband
 
+> [!NOTE]
+> **This is a fork** of [rtl-airband/RTLSDR-Airband](https://github.com/rtl-airband/RTLSDR-Airband).
+> It follows upstream closely (upstream is merged in regularly) and adds the changes below. Apart
+> from this section, the README and the [documentation](https://github.com/rtl-airband/RTLSDR-Airband/wiki)
+> are upstream's. The fork is the radio half of [airband-hub](https://github.com/ap-andersson/airband-hub).
+
+## How this fork differs from upstream
+
+### New features
+
+- **Prometheus metrics over HTTP.** A top-level `metrics_listen` setting serves the same
+  Prometheus text as the stats file at `GET /metrics`, current at each scrape and independent of
+  `stats_filepath`:
+
+  ```
+  metrics_listen = "0.0.0.0:9101";   # ":9101" for all interfaces, "[::1]:9101" for IPv6
+  ```
+
+  An invalid address or a port that cannot be bound stops startup. Non-finite values are written
+  as `NaN`/`+Inf`/`-Inf`, which Prometheus parsers accept.
+- **More metrics**, in both the stats file and `/metrics`. The existing metric names are unchanged.
+  - `channel_transmission_snr_db` and `channel_transmission_duration_seconds`: histograms recorded
+    for every transmission when the squelch closes, so none are missed between scrapes. The
+    duration's `_sum` is the total airtime.
+  - `channel_dbfs_squelch_level`: the squelch threshold on the same dBFS scale as the noise and
+    signal levels.
+  - `channel_squelch_open`: 1 while a frequency's squelch is open. In scan mode only the tuned
+    frequency can be 1.
+  - `device_samples_total`, `device_clipped_samples_total` and `device_input_power_sum_total`:
+    raw I/Q sample counters per device, for the clipping ratio and mean input power over any window.
+  - `rtl_airband_build_info`.
+- **The MP3 bitrate and VBR mode can be set per output**, with `bitrate` (kbit/s: 8, 16, 24, 32, 40,
+  48, 56, 64, 80, 96, 112, 128, 144 or 160) and `vbr` (`true`/`false`). The defaults, 16 kbit/s VBR,
+  are upstream's fixed settings. A CBR stream keeps a constant, short delay in players, while a VBR
+  file output stays small on disk.
+
+### Fixes
+
+- **Scan mode no longer hops away from a transmission it just tuned to.** The 200 ms dwell was
+  shorter than the time a new signal needs to reach the squelch, so transmissions starting late in
+  a dwell were missed until the next scan cycle.
+- **Scan mode no longer leaks the previous frequency's audio into the next one.** Samples from
+  before a retune are dropped instead of running through the new frequency's squelch, which used
+  to cause short false transmissions and clip the start of real ones.
+
+### Container image and CI
+
+- The Dockerfile has an `NFM` build argument (default `TRUE`). Build with `--build-arg NFM=FALSE`
+  for AM only, since NFM support also doubles the audio rate from 8 to 16 kHz. Rebuilds reuse a
+  cached build tree.
+- GitHub Actions publishes an **AM-only image** for amd64 and arm64:
+  `ghcr.io/ap-andersson/rtlsdr-airband` (`:latest` from main, `:sha-<commit>` for every build).
+- Upstream's workflows are kept but only run by hand: this fork has no self-hosted runners, and
+  keeping the files makes merges from upstream simpler.
+
+None of this has been offered upstream yet.
+
+---
+
 ![version tag](https://img.shields.io/github/v/tag/rtl-airband/RTLSDR-Airband?label=)
 
 ### CI Workflow Status
